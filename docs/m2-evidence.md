@@ -78,3 +78,15 @@ Real Mongo 7.0.37 tests passed live-lease exclusion, expiry/reclaim, stale Confi
 Both required tagged tests ran against SDK `42fa4c3`, real isolated MySQL 8.0.44 / Mongo 7.0.37, and passed. Temporary Go workspaces avoid changing service module dependencies; scripts accept no production connection strings and cleaned their own containers. Service main checkouts and production configuration were untouched. SDK 42fa4c3 passed all four CI jobs.
 
 These test-only drafts use an extra SDK table/collection for comparison, not a proposed production dual-publish scheme. IAM's proof maps stored created_at once because the old row lacks occurred_at; qs-server reads persisted envelope metadata while retaining raw bytes. Final historical identity policy and schema/claim/status/token migration remain open. qs-server uses a synthetic business record; full AnswerSheet acceptance is later. Normal service CI does not run these tagged cross-repo proofs. API remains provisional until remaining compatibility/fault gates pass.
+
+## M2-06: real process death with MySQL, Relay and NSQ
+
+`TestRelayProcessCrashRecovery` launches a separate copy of the integration binary, using the actual MySQL Store, Relay and NSQ adapter. A barrier freezes it immediately after a durable claim or after NSQ confirmation but before the DB confirmation update. The parent sends SIGKILL and checks the actual exit signal. A fresh Relay waits for natural database-time lease expiry; there is no manual mutation of the lease or message.
+
+Both points passed against real MySQL 8.0.44 / NSQ 1.3.0. Before-publish death recovered the original ID with two claim attempts and one observed physical delivery. Before-writeback death recovered the original ID with two claim attempts and two physical deliveries. Exact payload bytes matched. A deliberately idempotent fixture consumer stored one row/effect in both cases. This is a combined transport/recovery proof, not evidence that existing IAM or qs-server consumers are idempotent. It does not prove broker/node power-loss durability.
+
+The test owns a separate temporary DB per case and kills/reaps its child process on failures. Required infrastructure remains mandatory. Standard check/race and lint are separate from the tagged integration binary; the actual crash experiment is not represented as a race-instrumented run.
+
+## Service draft CI follow-up
+
+IAM #93 at 7c262f0e passed Analyze, Lint, Run Tests and Build. SDK 56f8eea passed all four jobs. qs-server #127 initially failed Docs Hygiene because the new sidecar was missing from document-closure.json and its source baseline had moved. Commit 42d10cb82 registers the test-only document as needs_review and updates the source baseline; local `make docs-facts` passed. Its new CI remains separate. Normal service jobs do not execute cross-repo tagged transaction proofs.
