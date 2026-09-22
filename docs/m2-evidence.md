@@ -110,3 +110,12 @@ The provisional Store.Retry API now takes a positive time.Duration rather than a
 Real-storage tests reject zero/negative delays without changing ownership, compare persisted due times with database time, preserve a literal dollar-prefixed code, exclude future records and continue to reject stale writers. Existing host-policy ownership and retry budgets remain unchanged. This closes the demonstrated host/DB skew dependency for relative delivery retry only: initial Appender due times are still explicit business scheduling instants; database wall-clock steps/failover require an operational policy, and this is not a clock-synchronization test. The earlier absolute-Retry entries above describe historical revisions, superseded here. No stable SDK version or production adapter has been released.
 
 Validation: make check (including race), make lint, integration-tag vet and the complete isolated MySQL/Mongo/NSQ suite passed. Existing SIGKILL recovery, unknown commit, publication confirmation loss and stale-claim tests remain passing; isolated resources were removed. New CI is checked separately.
+
+
+## Two Relays and a late result
+
+`TestLateRelayCannotOverwriteRecoveredClaim` runs two actual Relays against real MySQL. A controlled publisher double holds the old result beyond its context deadline; the database lease expires naturally, and the replacement Relay publishes the same immutable message and confirms it. Releasing the old result then produces stale_write_rejected. The published state and version remain unchanged, with exactly two claims. No lease field is manually advanced.
+
+This is a database/Relay fencing and observation test, not a real broker test. The deliberately non-cooperative publisher models a delayed old execution; it does not promise shutdown for arbitrary callbacks that never return. Initial test construction exposed a wrong SQL column name and cross-test row leakage; both were corrected, with identity-scoped cleanup and bounded drain. Final full-suite result is recorded below.
+
+Final verification: complete isolated integration passed after fixture cleanup correction; check/race, lint and integration-tag vet passed. All child/Relay work and dedicated containers were drained/removed. SDK d2cdbdd four CI jobs passed; the new test commit has separate CI. See [remaining M2 gates](m2-acceptance-gaps.md) for the direct-evidence map.
