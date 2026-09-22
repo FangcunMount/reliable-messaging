@@ -13,7 +13,9 @@ import (
 
 	"github.com/FangcunMount/reliable-messaging/message"
 	"github.com/FangcunMount/reliable-messaging/outbox"
+	"github.com/FangcunMount/reliable-messaging/relay"
 	store "github.com/FangcunMount/reliable-messaging/storage/mysql"
+	"github.com/FangcunMount/reliable-messaging/transport"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -187,4 +189,93 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 	if _, err = store.Bind(nil); err == nil {
 		t.Fatal("missing transaction accepted")
 	}
+}
+
+// This injects an actual MySQL write rejection. The publisher is an in-process
+// transport double; broker confirmation-loss/crash tests remain a separate gate.
+func TestRelayRecoversRealDatabaseWriteFailure(t *testing.T) {
+	dsn := os.Getenv("RM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Fatal("isolated DSN required")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = db.ExecContext(ctx, store.Schema)
+	must(err)
+	_, err = db.ExecContext(ctx, "DELETE FROM rm_outbox")
+	must(err)
+	in := message.Input{Producer: "relay", ID: "write-failure", Destination: "events", EventType: "created", SchemaVersion: "1", Scope: "global", ContentType: "application/json", OccurredAt: "2026-09-22T00:00:00Z", Payload: []byte(`{"version":7,"extension":"preserved"}`)}
+	m, err := message.New(in)
+	must(err)
+	tx, err := db.BeginTx(ctx, nil)
+	must(err)
+	defer tx.Rollback()
+	a, err := store.Bind(tx)
+	must(err)
+	must(a.Append(ctx, m, time.Now().Add(-time.Second)))
+	must(tx.Commit())
+	_, err = db.ExecContext(ctx, `CREATE TRIGGER fail_confirmation BEFORE UPDATE ON rm_outbox FOR EACH ROW BEGIN IF NEW.state='published' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='isolated confirmation write failure'; END IF; END`)
+	must(err)
+	defer db.ExecContext(context.Background(), "DROP TRIGGER IF EXISTS fail_confirmation")
+	s, err := store.New(db)
+	must(err)
+	var sent []message.Message
+	publisher := integrationPublisher(func(_ context.Context, m message.Message) transport.Result {
+		sent = append(sent, m)
+		return transport.Result{Outcome: transport.Confirmed}
+	})
+	run := func(want string) {
+		t.Helper()
+		runCtx, stop := context.WithCancel(ctx)
+		defer stop()
+		observed := ""
+		r, err := relay.New(s, publisher, relay.Config{Concurrency: 1, PollInterval: time.Millisecond, Lease: 3 * time.Second, PublishTimeout: time.Second, WriteTimeout: time.Second, Retry: func(outbox.Claim, transport.Outcome) relay.RetryDecision {
+			return relay.RetryDecision{Delay: time.Second}
+		}, Observe: func(e relay.Event) {
+			if e.Kind == "write_failed" || e.Kind == "write_succeeded" {
+				observed = e.Kind
+				stop()
+			}
+		}})
+		must(err)
+		must(r.Run(runCtx))
+		if observed != want {
+			t.Fatalf("observed %q want %q", observed, want)
+		}
+	}
+	run("write_failed")
+	var state string
+	must(db.QueryRowContext(ctx, "SELECT state FROM rm_outbox WHERE message_id=?", in.ID).Scan(&state))
+	if state != "publishing" {
+		t.Fatalf("lost recoverable record: %s", state)
+	}
+	_, err = db.ExecContext(ctx, "DROP TRIGGER fail_confirmation")
+	must(err)
+	_, err = db.ExecContext(ctx, "UPDATE rm_outbox SET lease_until=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND")
+	must(err)
+	run("write_succeeded")
+	if len(sent) != 2 || sent[0].Fingerprint() != m.Fingerprint() || sent[1].Fingerprint() != m.Fingerprint() || string(sent[1].Input().Payload) != string(in.Payload) {
+		t.Fatal("recovery changed original identity/bytes")
+	}
+	must(db.QueryRowContext(ctx, "SELECT state FROM rm_outbox WHERE message_id=?", in.ID).Scan(&state))
+	if state != "published" {
+		t.Fatalf("not confirmed: %s", state)
+	}
+}
+
+type integrationPublisher func(context.Context, message.Message) transport.Result
+
+func (f integrationPublisher) Publish(ctx context.Context, m message.Message) transport.Result {
+	return f(ctx, m)
 }

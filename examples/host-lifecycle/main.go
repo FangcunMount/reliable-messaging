@@ -1,50 +1,70 @@
-// Host lifecycle reference: explicit start, stop admission, drain, then close.
-// No production Relay implementation is implied by this example.
+// Executable SDK lifecycle reference. The store/publisher below are test doubles;
+// the separate MySQL integration proves persistence and transaction behavior.
 package main
 
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/FangcunMount/reliable-messaging/message"
+	"github.com/FangcunMount/reliable-messaging/outbox"
+	"github.com/FangcunMount/reliable-messaging/relay"
+	"github.com/FangcunMount/reliable-messaging/transport"
 )
 
-type runner struct{ jobs <-chan func() }
-
-func newRunner(jobs <-chan func()) runner { return runner{jobs: jobs} }
-
-// run returns after an already admitted operation finishes. The real Relay
-// must additionally bound transport calls, drain duration and lease recovery.
-func (r runner) run(ctx context.Context) {
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case job, ok := <-r.jobs:
-			if !ok {
-				return
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			job()
-		}
-	}
+type exampleStore struct {
+	message            message.Message
+	claimed, confirmed bool
 }
 
+func (s *exampleStore) ClaimDue(context.Context, int, time.Duration) ([]outbox.Claim, error) {
+	if s.claimed {
+		return nil, nil
+	}
+	s.claimed = true
+	return []outbox.Claim{{Message: s.message}}, nil
+}
+func (s *exampleStore) Confirm(context.Context, outbox.Claim) error                  { s.confirmed = true; return nil }
+func (s *exampleStore) Retry(context.Context, outbox.Claim, time.Time, string) error { return nil }
+func (s *exampleStore) Quarantine(context.Context, outbox.Claim, string) error       { return nil }
+
+type examplePublisher struct{ started, release chan struct{} }
+
+func (p examplePublisher) Publish(ctx context.Context, _ message.Message) transport.Result {
+	close(p.started)
+	select {
+	case <-p.release:
+		return transport.Result{Outcome: transport.Confirmed}
+	case <-ctx.Done():
+		return transport.Result{Outcome: transport.Unknown}
+	}
+}
 func main() {
+	m, err := message.New(message.Input{Producer: "example", ID: "1", Destination: "events", EventType: "created", SchemaVersion: "1", Scope: "global", ContentType: "application/json", OccurredAt: "2026-09-22T00:00:00Z", Payload: []byte(`{"version":1}`)})
+	if err != nil {
+		panic(err)
+	}
+	store := &exampleStore{message: m}
+	publisher := examplePublisher{make(chan struct{}), make(chan struct{})}
+	r, err := relay.New(store, publisher, relay.Config{Concurrency: 1, PollInterval: time.Millisecond, Lease: 3 * time.Second, PublishTimeout: time.Second, WriteTimeout: time.Second, Retry: func(outbox.Claim, transport.Outcome) relay.RetryDecision {
+		return relay.RetryDecision{Delay: time.Second}
+	}, Observe: func(relay.Event) {}})
+	if err != nil {
+		panic(err)
+	}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	jobs := make(chan func())
-	r := newRunner(jobs) // No goroutine or resources acquired by construction.
-	done := make(chan struct{})
-	go func() { defer close(done); r.run(ctx) }() // Host starts explicitly.
-	started, release := make(chan struct{}), make(chan struct{})
-	jobs <- func() { close(started); <-release }
-	<-started
-	stop() // Stop admission; do not close host resources while work is in flight.
-	close(release)
-	<-done // Drain completes before the host closes DB / transport resources.
-	fmt.Println("PASS explicit start, stop admission, drain, then host resource close")
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	<-publisher.started
+	stop() // Stop admission before closing host resources.
+	close(publisher.release)
+	if err = <-done; err != nil {
+		panic(err)
+	} // Drain before closing DB / broker.
+	if !store.confirmed {
+		panic("admitted delivery was not drained")
+	}
+	fmt.Println("PASS SDK Relay explicit start, stop admission, drain, then host resource close")
 }
