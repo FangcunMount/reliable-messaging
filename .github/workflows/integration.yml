@@ -1,0 +1,16 @@
+name: Isolated infrastructure
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  infrastructure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.12'
+      - run: make integration
