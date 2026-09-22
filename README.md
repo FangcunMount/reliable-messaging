@@ -11,6 +11,7 @@
 ```sh
 make check
 make lint
+make integration  # disposable local Docker resources
 ```
 
 根目录单 module。只有实际需求出现时才创建适配器与公开包；当前 `tests/compatibility` 验证候选跨语言身份样例，`tests/architecture` 约束依赖边界。
@@ -28,5 +29,7 @@ make lint
 项目发起人最终审核 SDK、IAM 接入、qs-server 接入和运维。仓库保持私有，通过有权访问的 GitHub 账号分发 Go module；调用方配置 `GOPRIVATE=github.com/FangcunMount/*`，凭据由本机或 CI 管理，不写入仓库。
 
 首期内部私有使用，不添加开放源码授权；对外分发与许可证另行决定。依赖仍遵守各自许可证。
+
+真实隔离环境入口见 [integration](tests/integration/README.md)，可执行接入参考见 [examples](examples/README.md)。
 
 详见 [契约](contracts/README.md)、[开发规则](CONTRIBUTING.md) 与 [阶段状态](docs/status.md)。

@@ -1,6 +1,6 @@
 GO ?= go
 GOLANGCI_VERSION := v2.5.0
-.PHONY: check fmt-check test race vet lint
+.PHONY: check fmt-check test race vet lint integration
 check: fmt-check vet test race
 fmt-check:
 	@test -z "$$(gofmt -l $$(git ls-files '*.go') $$(git ls-files --others --exclude-standard '*.go'))"
@@ -13,3 +13,5 @@ race:
 lint:
 	GOBIN="$(CURDIR)/bin" $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 	./bin/golangci-lint run
+integration:
+	bash scripts/integration.sh
