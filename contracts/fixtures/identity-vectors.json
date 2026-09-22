@@ -1,0 +1,186 @@
+{
+  "status": "M0 candidate; freeze only after M2",
+  "fields": [
+    "producer",
+    "message_id",
+    "destination",
+    "event_type",
+    "schema_version",
+    "tenant",
+    "content_type",
+    "occurred_at",
+    "payload"
+  ],
+  "cases": [
+    {
+      "name": "iam-original",
+      "message": {
+        "producer": "iam",
+        "message_id": "iam-fixture-1",
+        "destination": "iam.authz.version.v2",
+        "event_type": "iam.authz.version_changed.v2",
+        "schema_version": "legacy-v2",
+        "tenant": "scope:global",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{\"version\":1}",
+        "wire_kind": "iam-raw"
+      },
+      "valid": true,
+      "expected_fingerprint": "b73088b965951b0de7f42071fc6d74e4e863f2420221f2aaaac39a306c02df9f"
+    },
+    {
+      "name": "iam-same-replay",
+      "message": {
+        "producer": "iam",
+        "message_id": "iam-fixture-1",
+        "destination": "iam.authz.version.v2",
+        "event_type": "iam.authz.version_changed.v2",
+        "schema_version": "legacy-v2",
+        "tenant": "scope:global",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{\"version\":1}",
+        "wire_kind": "iam-raw"
+      },
+      "valid": true,
+      "expected_fingerprint": "b73088b965951b0de7f42071fc6d74e4e863f2420221f2aaaac39a306c02df9f"
+    },
+    {
+      "name": "iam-content-conflict",
+      "message": {
+        "producer": "iam",
+        "message_id": "iam-fixture-1",
+        "destination": "iam.authz.version.v2",
+        "event_type": "iam.authz.version_changed.v2",
+        "schema_version": "legacy-v2",
+        "tenant": "scope:global",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{\"version\":2}",
+        "wire_kind": "iam-raw"
+      },
+      "valid": true,
+      "expected_fingerprint": "c4f31eabfa104424f73777734d5ac681ad73963cb4ccc03ca5e7c34608e5013a"
+    },
+    {
+      "name": "iam-scope-conflict",
+      "message": {
+        "producer": "iam",
+        "message_id": "iam-fixture-1",
+        "destination": "iam.authz.version.v2",
+        "event_type": "iam.authz.version_changed.v2",
+        "schema_version": "legacy-v2",
+        "tenant": "tenant-a",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{\"version\":1}",
+        "wire_kind": "iam-raw"
+      },
+      "valid": false,
+      "expected_fingerprint": "f6635e714d685f0302d7bd83d91e87061af235e06b460f6d65b60c6f8c703485"
+    },
+    {
+      "name": "iam-format-conflict",
+      "message": {
+        "producer": "iam",
+        "message_id": "iam-fixture-1",
+        "destination": "iam.authz.version.v2",
+        "event_type": "iam.authz.version_changed.v2",
+        "schema_version": "legacy-v2",
+        "tenant": "scope:global",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{ \"version\": 1 }",
+        "wire_kind": "iam-raw"
+      },
+      "valid": true,
+      "expected_fingerprint": "9beb706341ecdad499d10d35d9aab088a687529a7cd546a6ea176dd19e3e4dfd"
+    },
+    {
+      "name": "qs-extension-preserved",
+      "message": {
+        "producer": "qs-server",
+        "message_id": "qs-fixture-1",
+        "destination": "qs.evaluation.lifecycle",
+        "event_type": "answersheet.submitted",
+        "schema_version": "legacy-envelope",
+        "tenant": "7",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{\"id\":\"qs-fixture-1\",\"eventType\":\"answersheet.submitted\",\"occurredAt\":\"2026-09-22T00:00:00Z\",\"aggregateType\":\"AnswerSheet\",\"aggregateID\":\"fixture-answer\",\"data\":{\"org_id\":7},\"futureExtension\":{\"keep\":true}}",
+        "wire_kind": "qs-envelope"
+      },
+      "valid": true,
+      "expected_fingerprint": "900cbdefd5c9ad6fc88c418beb9deee2710f16cd13c250cacf48e2e69ff4538b"
+    },
+    {
+      "name": "qs-same-replay",
+      "message": {
+        "producer": "qs-server",
+        "message_id": "qs-fixture-1",
+        "destination": "qs.evaluation.lifecycle",
+        "event_type": "answersheet.submitted",
+        "schema_version": "legacy-envelope",
+        "tenant": "7",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{\"id\":\"qs-fixture-1\",\"eventType\":\"answersheet.submitted\",\"occurredAt\":\"2026-09-22T00:00:00Z\",\"aggregateType\":\"AnswerSheet\",\"aggregateID\":\"fixture-answer\",\"data\":{\"org_id\":7},\"futureExtension\":{\"keep\":true}}",
+        "wire_kind": "qs-envelope"
+      },
+      "valid": true,
+      "expected_fingerprint": "900cbdefd5c9ad6fc88c418beb9deee2710f16cd13c250cacf48e2e69ff4538b"
+    },
+    {
+      "name": "qs-id-conflict",
+      "message": {
+        "producer": "qs-server",
+        "message_id": "different-id",
+        "destination": "qs.evaluation.lifecycle",
+        "event_type": "answersheet.submitted",
+        "schema_version": "legacy-envelope",
+        "tenant": "7",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{\"id\":\"qs-fixture-1\",\"eventType\":\"answersheet.submitted\",\"occurredAt\":\"2026-09-22T00:00:00Z\",\"aggregateType\":\"AnswerSheet\",\"aggregateID\":\"fixture-answer\",\"data\":{\"org_id\":7},\"futureExtension\":{\"keep\":true}}",
+        "wire_kind": "qs-envelope"
+      },
+      "valid": false,
+      "expected_fingerprint": "9989751405e747f87792f5d945e16a98915a71f2fa626da6123d2d19dcc9f82a"
+    },
+    {
+      "name": "qs-scope-conflict",
+      "message": {
+        "producer": "qs-server",
+        "message_id": "qs-fixture-1",
+        "destination": "qs.evaluation.lifecycle",
+        "event_type": "answersheet.submitted",
+        "schema_version": "legacy-envelope",
+        "tenant": "8",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{\"id\":\"qs-fixture-1\",\"eventType\":\"answersheet.submitted\",\"occurredAt\":\"2026-09-22T00:00:00Z\",\"aggregateType\":\"AnswerSheet\",\"aggregateID\":\"fixture-answer\",\"data\":{\"org_id\":7},\"futureExtension\":{\"keep\":true}}",
+        "wire_kind": "qs-envelope"
+      },
+      "valid": false,
+      "expected_fingerprint": "a6fe1224844e01f780a338bddf422ab87cbb154cece7cfb4bc0c98c424491086"
+    },
+    {
+      "name": "qs-type-conflict",
+      "message": {
+        "producer": "qs-server",
+        "message_id": "qs-fixture-1",
+        "destination": "qs.evaluation.lifecycle",
+        "event_type": "evaluation.requested",
+        "schema_version": "legacy-envelope",
+        "tenant": "7",
+        "content_type": "application/json",
+        "occurred_at": "2026-09-22T00:00:00Z",
+        "payload": "{\"id\":\"qs-fixture-1\",\"eventType\":\"answersheet.submitted\",\"occurredAt\":\"2026-09-22T00:00:00Z\",\"aggregateType\":\"AnswerSheet\",\"aggregateID\":\"fixture-answer\",\"data\":{\"org_id\":7},\"futureExtension\":{\"keep\":true}}",
+        "wire_kind": "qs-envelope"
+      },
+      "valid": false,
+      "expected_fingerprint": "1356d6941c56712a060d88d089958fe3e6c6855efe6b7b89032104d8194de878"
+    }
+  ]
+}
