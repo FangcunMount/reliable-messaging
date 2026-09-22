@@ -17,7 +17,7 @@ The first integration attempt uncovered a pre-existing readiness race: the MySQL
 ## Remaining M2 gates
 
 - Complete Relay acceptance against actual NSQ timeout/shutdown behavior; verify database/host clock skew policy.
-- NSQ raw-byte publisher and confirmed/rejected/unknown results.
+- Extend NSQ proof to the combined durable Relay/recovery loop and original consumer idempotency.
 - Actual IAM UoW/old-schema and qs-server Mongo transaction adapters and examples, including callback reentry and unknown commit.
 - Consumer compatibility/metrics and real crash, lost-confirm and writeback-fault experiments.
 - API review after both storage proofs; service acceptance belongs to later milestones.
@@ -36,3 +36,13 @@ Race-tested unit scenarios cover bounded admission/drain, concurrent Run rejecti
 `TestRelayRecoversRealDatabaseWriteFailure` uses a MySQL trigger to reject publication confirmation updates. The durable row stays publishing; after removing the fault and expiring its lease, the Relay sends the exact same identity/fingerprint/payload and reaches published. This is actual database error/recovery evidence with an in-process publisher double, not a broker ACK-loss or process-crash proof.
 
 Local `make check`, `make lint` and isolated integration passed for Relay and the fault test. After replacing the lifecycle example, its execution and vet also passed. The prior commit cf2e088 passed all four push/PR CI jobs. New commit CI remains separate. Host-supplied Retry due time still uses host UTC; clock-skew policy remains open before API acceptance.
+
+## M2-03: pinned NSQ adapter
+
+Added an adapter around host-owned go-nsq v1.1.0 with explicit copied route mapping and raw-byte preservation. Constructors do not connect/start work. Local invalid routing is rejected; nil driver results confirm broker acceptance; driver errors/timeouts remain unknown. No internal retry or business ACK claim is made.
+
+Source inspection of pinned producer.go showed that Publish/PublishAsync do not accept context, and Async can itself block during connect/admission. The adapter therefore bounds actual underlying calls, retaining capacity after caller timeout until the driver finishes. Publisher.Drain is an explicit second shutdown step after Relay.Run returns, before the host closes the producer/database. A drain timeout remains an incomplete shutdown, never success.
+
+Unit/race tests cover preserved route/bytes, conservative outcome classification, calls after drain, timeout capacity retention and observable incomplete drain. The real NSQ test uses a TCP proxy to drop the PUB OK after acceptance, then retries via a direct connection and compares both consumed bodies. Test setup must create topic before channel and use a broker-valid heartbeat below the driver read timeout; initial setup failures are not fault-test success.
+
+Real NSQ 1.3.0 lost-confirmation test passed after correcting setup. Both physical deliveries retained exact original bytes, first attempt was Unknown and retry Confirmed. The full isolated integration run passed and cleaned its resources. This is not evidence of host consumer idempotency, process-crash recovery or synchronous disk durability.

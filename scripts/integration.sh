@@ -48,7 +48,7 @@ build_dir=$(mktemp -d "${TMPDIR:-/tmp}/$project-build.XXXXXX")
 (cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/mysql-integration" ./tests/integration)
 "${compose[@]}" cp "$build_dir/mysql-integration" mysql:/tmp/mysql-integration
 "${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_sdk_test'
-"${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' mysql /tmp/mysql-integration -test.v
+"${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/mysql-integration -test.v
 
 
 "${compose[@]}" exec -T mongo mongosh --quiet --file /dev/stdin < "$repo/tests/integration/mongo-smoke.js"
@@ -74,4 +74,4 @@ try:
 finally:
     path.unlink(missing_ok=True)
 PY
-echo 'PASS isolated infrastructure probes; SDK fault matrix is not implemented yet'
+echo 'PASS isolated infrastructure and implemented SDK tests; full fault matrix remains incomplete'
