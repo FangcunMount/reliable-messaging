@@ -25,6 +25,12 @@ var Schema string
 
 type Appender struct{ tx *sql.Tx }
 
+// Standard-schema scheduling columns store UTC clock digits. Passing time.Time
+// to MySQL would let the host driver's loc transform them again. String values
+// preserve this storage contract without changing the caller's transaction or
+// session timezone (including business sessions using UTC+8).
+const databaseTimeLayout = "2006-01-02 15:04:05.000000"
+
 // Bind requires the existing host transaction; it never begins or commits one.
 func Bind(tx *sql.Tx) (*Appender, error) {
 	if tx == nil {
@@ -44,7 +50,7 @@ func (a *Appender) Append(ctx context.Context, m message.Message, due time.Time)
 	hash := m.Fingerprint()
 	_, err := a.tx.ExecContext(ctx, `INSERT INTO rm_outbox
  (producer,message_id,destination,event_type,schema_version,scope,content_type,occurred_at,payload,fingerprint,next_attempt_at)
- VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id=id`, in.Producer, in.ID, in.Destination, in.EventType, in.SchemaVersion, in.Scope, in.ContentType, in.OccurredAt, in.Payload, hash[:], due.UTC())
+ VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id=id`, in.Producer, in.ID, in.Destination, in.EventType, in.SchemaVersion, in.Scope, in.ContentType, in.OccurredAt, in.Payload, hash[:], due.UTC().Format(databaseTimeLayout))
 	if err != nil {
 		return err
 	}
@@ -78,13 +84,17 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([
 		return nil, err
 	}
 	defer tx.Rollback()
-	var now time.Time
-	if err := tx.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&now); err != nil {
+	var nowText string
+	if err := tx.QueryRowContext(ctx, "SELECT DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%d %H:%i:%s.%f')").Scan(&nowText); err != nil {
 		return nil, err
+	}
+	now, err := time.Parse(databaseTimeLayout, nowText)
+	if err != nil {
+		return nil, fmt.Errorf("decode database UTC clock: %w", err)
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id,producer,message_id,destination,event_type,schema_version,scope,content_type,occurred_at,payload,fingerprint,version,attempt_count FROM rm_outbox
  WHERE (state IN ('pending','retry_wait') AND next_attempt_at<=?) OR (state='publishing' AND lease_until<=?)
- ORDER BY next_attempt_at,id LIMIT ? FOR UPDATE SKIP LOCKED`, now, now, limit)
+ ORDER BY next_attempt_at,id LIMIT ? FOR UPDATE SKIP LOCKED`, nowText, nowText, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +137,7 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([
 		c.claim.Token = hex.EncodeToString(token[:])
 		c.claim.LeaseUntil = now.Add(lease).Truncate(time.Microsecond)
 		c.claim.Message = m
-		if _, err := tx.ExecContext(ctx, `UPDATE rm_outbox SET state='publishing',claim_token=?,lease_until=?,version=version+1,attempt_count=attempt_count+1 WHERE id=? AND version=?`, c.claim.Token, c.claim.LeaseUntil, c.claim.RecordID, c.claim.Version); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE rm_outbox SET state='publishing',claim_token=?,lease_until=?,version=version+1,attempt_count=attempt_count+1 WHERE id=? AND version=?`, c.claim.Token, c.claim.LeaseUntil.Format(databaseTimeLayout), c.claim.RecordID, c.claim.Version); err != nil {
 			return nil, err
 		}
 		c.claim.Version++

@@ -2,7 +2,7 @@
 
 独立、经过裁剪的 Go 可靠消息 SDK。宿主在原业务事务中持久化消息意图，并管理 Relay 的运行与停止；首期复用 NSQ。
 
-**当前：M1 工程骨架，尚无可用于生产的 SDK API。** M0 已完成代码与部署基线分析。契约参考测试通过不代表 Outbox、事务适配或生产切换已经实现。
+**当前：M2 已验收，v0.1.0-m2.1 已预发布；M3 IAM 接入进行中。** 标准 Outbox、原事务适配、Relay 与 NSQ 传输已有真实隔离验证；尚未完成服务生产切换。正式 v0.1.0 仍需 IAM 验收。
 
 ## 开发
 
@@ -21,7 +21,7 @@ make integration  # disposable local Docker resources
 - 不新增中央消息数据库，Outbox 与业务事实使用宿主原事务。
 - Broker 发布确认不代表消费者完成，更不自动解决 MySQL 双写。
 - 传输重试保持消息身份，业务重试授权留宿主；未知外部调用不盲目重发。
-- 历史 schema/wire、人工治理、冻结配置及回滚语义必须保留。
+- 历史未完成消息、wire、人工治理、冻结配置及回滚语义必须保护。IAM 已选择旧链路排空后使用标准表，标准表仍属于宿主原数据库。
 - 双存储与故障验证在 M2；IAM、qs-server 切换分别在 M3/M5；Python 和 RabbitMQ 独立评估。
 
 ## 维护与分发
@@ -31,5 +31,7 @@ make integration  # disposable local Docker resources
 首期内部私有使用，不添加开放源码授权；对外分发与许可证另行决定。依赖仍遵守各自许可证。
 
 真实隔离环境入口见 [integration](tests/integration/README.md)，可执行接入参考见 [examples](examples/README.md)。
+
+MySQL 原事务可使用 UTC 或 UTC+8 驱动连接；标准表时间字段的显式存储约定及非 UTC 修正见 [MySQL 时间边界](storage/mysql/README.md)。
 
 详见 [契约](contracts/README.md)、[开发规则](CONTRIBUTING.md) 与 [阶段状态](docs/status.md)。
