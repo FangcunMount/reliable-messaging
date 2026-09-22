@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/FangcunMount/reliable-messaging/message"
@@ -155,10 +156,11 @@ func (s *Store) Quarantine(ctx context.Context, c outbox.Claim, code string) err
 	return s.update(ctx, c, `state='quarantined',last_error_code=?`, code)
 }
 func (s *Store) update(ctx context.Context, c outbox.Claim, set string, args ...any) error {
-	if c.RecordID == 0 || c.Token == "" || c.Version == 0 {
+	id, parseErr := strconv.ParseUint(c.RecordID, 10, 64)
+	if parseErr != nil || id == 0 || strconv.FormatUint(id, 10) != c.RecordID || c.Token == "" || c.Version == 0 {
 		return outbox.ErrStaleClaim
 	}
-	args = append(args, c.RecordID, c.Token, c.Version)
+	args = append(args, id, c.Token, c.Version)
 	result, err := s.db.ExecContext(ctx, `UPDATE rm_outbox SET `+set+`,claim_token=NULL,lease_until=NULL,version=version+1
  WHERE id=? AND claim_token=? AND version=? AND state='publishing' AND lease_until>UTC_TIMESTAMP(6)`, args...)
 	if err != nil {

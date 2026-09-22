@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -130,6 +131,114 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 	if string(record.Payload) != string(m.Input().Payload) {
 		t.Fatal("original bytes lost")
 	}
+	s, err := adapter.New(db.Collection("outbox"))
+	must(err)
+	_, err = db.Collection("outbox").Indexes().CreateMany(ctx, adapter.Indexes())
+	must(err)
+	claims, err := s.ClaimDue(ctx, 10, time.Minute)
+	must(err)
+	if len(claims) != 1 {
+		t.Fatalf("claims %d", len(claims))
+	}
+	old := claims[0]
+	claims, err = s.ClaimDue(ctx, 10, time.Minute)
+	must(err)
+	if len(claims) != 0 {
+		t.Fatal("live claim stolen")
+	}
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"lease_until": time.Now().Add(-time.Minute)}})
+	must(err)
+	if err = s.Confirm(ctx, old); !errors.Is(err, outbox.ErrStaleClaim) {
+		t.Fatal("expired confirm accepted", err)
+	}
+	claims, err = s.ClaimDue(ctx, 10, time.Minute)
+	must(err)
+	if len(claims) != 1 {
+		t.Fatal("expired claim not recovered")
+	}
+	fresh := claims[0]
+	if fresh.RecordID != old.RecordID || fresh.Token == old.Token || fresh.Version <= old.Version || fresh.Attempts != 2 {
+		t.Fatal("reclaim fencing changed incorrectly")
+	}
+	for _, e := range []error{s.Confirm(ctx, old), s.Retry(ctx, old, time.Now(), "unknown"), s.Quarantine(ctx, old, "invalid")} {
+		if !errors.Is(e, outbox.ErrStaleClaim) {
+			t.Fatal("stale write accepted", e)
+		}
+	}
+	must(s.Retry(ctx, fresh, time.Now().Add(time.Hour), "unknown"))
+	claims, err = s.ClaimDue(ctx, 10, time.Minute)
+	must(err)
+	if len(claims) != 0 {
+		t.Fatal("retry before due")
+	}
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"next_attempt_at": time.Now().Add(-time.Minute)}})
+	must(err)
+	claims, err = s.ClaimDue(ctx, 10, time.Minute)
+	must(err)
+	if len(claims) != 1 {
+		t.Fatal("due retry missing")
+	}
+	must(s.Confirm(ctx, claims[0]))
+	claims, err = s.ClaimDue(ctx, 10, time.Minute)
+	must(err)
+	if len(claims) != 0 {
+		t.Fatal("published record reclaimed")
+	}
+	_, err = session.WithTransaction(ctx, func(sc driver.SessionContext) (interface{}, error) {
+		a, e := adapter.Bind(sc, db.Collection("outbox"))
+		if e != nil {
+			return nil, e
+		}
+		for i := 0; i < 6; i++ {
+			in.ID = fmt.Sprintf("parallel-%d", i)
+			item, e := message.New(in)
+			if e != nil {
+				return nil, e
+			}
+			if e = a.Append(item, due); e != nil {
+				return nil, e
+			}
+		}
+		return nil, nil
+	}, opts)
+	must(err)
+	type claimResult struct {
+		claims []outbox.Claim
+		err    error
+	}
+	results := make(chan claimResult, 2)
+	for i := 0; i < 2; i++ {
+		go func() { cs, e := s.ClaimDue(ctx, 6, time.Minute); results <- claimResult{cs, e} }()
+	}
+	seen := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		r := <-results
+		must(r.err)
+		for _, c := range r.claims {
+			if seen[c.RecordID] {
+				t.Fatal("duplicate concurrent claim")
+			}
+			seen[c.RecordID] = true
+			must(s.Confirm(ctx, c))
+		}
+	}
+	if len(seen) != 6 {
+		t.Fatalf("claimed %d of 6", len(seen))
+	}
+	// A malformed immutable payload stays visible in quarantine.
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"state": "pending", "payload": []byte("tampered")}})
+	must(err)
+	claims, err = s.ClaimDue(ctx, 10, time.Minute)
+	must(err)
+	if len(claims) != 0 {
+		t.Fatal("corrupt record published")
+	}
+	n, err := db.Collection("outbox").CountDocuments(ctx, bson.M{"message_id": "stable", "state": "quarantined", "payload": []byte("tampered")})
+	must(err)
+	if n != 1 {
+		t.Fatal("quarantine evidence lost")
+	}
+
 }
 
 func TestMongoUnknownCommitRetriesCommitNotBusiness(t *testing.T) {

@@ -15,7 +15,8 @@ var (
 )
 
 type Claim struct {
-	RecordID   uint64
+	// RecordID is an opaque storage key. Relay must not parse or reconstruct it.
+	RecordID   string
 	Token      string
 	Version    uint64
 	Attempts   uint64

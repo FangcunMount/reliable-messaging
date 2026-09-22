@@ -154,7 +154,7 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		go func() { cs, e := s.ClaimDue(ctx, 8, time.Minute); results <- result{cs, e} }()
 	}
-	seen := map[uint64]bool{}
+	seen := map[string]bool{}
 	for i := 0; i < 2; i++ {
 		r := <-results
 		must(r.err)
