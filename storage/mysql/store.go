@@ -143,11 +143,15 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([
 func (s *Store) Confirm(ctx context.Context, c outbox.Claim) error {
 	return s.update(ctx, c, `state='published',transport_confirmed_at=UTC_TIMESTAMP(6),last_error_code=''`)
 }
-func (s *Store) Retry(ctx context.Context, c outbox.Claim, due time.Time, code string) error {
-	if due.IsZero() || code == "" || len(code) > 128 {
-		return errors.New("retry requires due time and bounded error code")
+func (s *Store) Retry(ctx context.Context, c outbox.Claim, delay time.Duration, code string) error {
+	if delay <= 0 || code == "" || len(code) > 128 {
+		return errors.New("retry requires positive delay and bounded error code")
 	}
-	return s.update(ctx, c, `state='retry_wait',next_attempt_at=?,last_error_code=?`, due.UTC(), code)
+	micros := delay / time.Microsecond
+	if delay%time.Microsecond != 0 {
+		micros++
+	}
+	return s.update(ctx, c, `state='retry_wait',next_attempt_at=TIMESTAMPADD(MICROSECOND,?,UTC_TIMESTAMP(6)),last_error_code=?`, int64(micros), code)
 }
 func (s *Store) Quarantine(ctx context.Context, c outbox.Claim, code string) error {
 	if code == "" || len(code) > 128 {

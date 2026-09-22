@@ -160,12 +160,31 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 	if fresh.RecordID != old.RecordID || fresh.Token == old.Token || fresh.Version <= old.Version || fresh.Attempts != 2 {
 		t.Fatal("reclaim fencing changed incorrectly")
 	}
-	for _, e := range []error{s.Confirm(ctx, old), s.Retry(ctx, old, time.Now(), "unknown"), s.Quarantine(ctx, old, "invalid")} {
+	for _, e := range []error{s.Confirm(ctx, old), s.Retry(ctx, old, time.Second, "unknown"), s.Quarantine(ctx, old, "invalid")} {
 		if !errors.Is(e, outbox.ErrStaleClaim) {
 			t.Fatal("stale write accepted", e)
 		}
 	}
-	must(s.Retry(ctx, fresh, time.Now().Add(time.Hour), "unknown"))
+	for _, delay := range []time.Duration{0, -time.Second} {
+		if e := s.Retry(ctx, fresh, delay, "unknown"); e == nil {
+			t.Fatal("nonpositive retry delay accepted")
+		}
+	}
+	must(s.Retry(ctx, fresh, time.Hour, "$literal-error"))
+	cursor, e := db.Collection("outbox").Aggregate(ctx, bson.A{
+		bson.M{"$match": bson.M{"message_id": "stable"}},
+		bson.M{"$project": bson.M{"remaining_ms": bson.M{"$subtract": bson.A{"$next_attempt_at", "$$NOW"}}, "last_error_code": 1}},
+	})
+	must(e)
+	var remaining []struct {
+		Millis int64  `bson:"remaining_ms"`
+		Code   string `bson:"last_error_code"`
+	}
+	must(cursor.All(ctx, &remaining))
+	if len(remaining) != 1 || remaining[0].Code != "$literal-error" || remaining[0].Millis > time.Hour.Milliseconds() || remaining[0].Millis < (time.Hour-10*time.Second).Milliseconds() {
+		t.Fatalf("retry database clock/literal: %+v", remaining)
+	}
+
 	claims, err = s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 0 {

@@ -115,12 +115,23 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 	if fresh.Token == old.Token || fresh.Version <= old.Version || fresh.Attempts != 2 || fresh.Message.Fingerprint() != m.Fingerprint() {
 		t.Fatal("reclaim identity/fencing violated")
 	}
-	for _, err := range []error{s.Confirm(ctx, old), s.Retry(ctx, old, time.Now(), "network"), s.Quarantine(ctx, old, "invalid")} {
+	for _, err := range []error{s.Confirm(ctx, old), s.Retry(ctx, old, time.Second, "network"), s.Quarantine(ctx, old, "invalid")} {
 		if !errors.Is(err, outbox.ErrStaleClaim) {
 			t.Fatalf("stale writer: %v", err)
 		}
 	}
-	must(s.Retry(ctx, fresh, time.Now().Add(time.Hour), "unknown"))
+	for _, delay := range []time.Duration{0, -time.Second} {
+		if e := s.Retry(ctx, fresh, delay, "unknown"); e == nil {
+			t.Fatal("nonpositive retry delay accepted")
+		}
+	}
+	must(s.Retry(ctx, fresh, time.Hour, "unknown"))
+	var remainingMicros int64
+	must(db.QueryRowContext(ctx, "SELECT TIMESTAMPDIFF(MICROSECOND,UTC_TIMESTAMP(6),next_attempt_at) FROM rm_outbox WHERE id=?", fresh.RecordID).Scan(&remainingMicros))
+	if remainingMicros > time.Hour.Microseconds() || remainingMicros < (time.Hour-10*time.Second).Microseconds() {
+		t.Fatalf("retry not relative to DB clock: %d us", remainingMicros)
+	}
+
 	claims, err = s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 0 {

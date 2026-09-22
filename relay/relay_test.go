@@ -42,9 +42,9 @@ func (s *fakeStore) write(kind string) error {
 	return s.writeErr
 }
 func (s *fakeStore) Confirm(context.Context, outbox.Claim) error { return s.write("confirm") }
-func (s *fakeStore) Retry(_ context.Context, _ outbox.Claim, due time.Time, _ string) error {
-	if !due.After(time.Now()) {
-		return errors.New("retry due not future")
+func (s *fakeStore) Retry(_ context.Context, _ outbox.Claim, delay time.Duration, _ string) error {
+	if delay <= 0 {
+		return errors.New("retry delay not positive")
 	}
 	return s.write("retry")
 }

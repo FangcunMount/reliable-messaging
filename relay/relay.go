@@ -125,7 +125,7 @@ func (r *Relay) deliver(ctx context.Context, c outbox.Claim) {
 		} else if decision.Delay <= 0 {
 			err = errors.New("retry policy requires positive delay or explicit quarantine")
 		} else {
-			err = r.store.Retry(writeCtx, c, time.Now().UTC().Add(decision.Delay), code)
+			err = r.store.Retry(writeCtx, c, decision.Delay, code)
 		}
 	}
 	if err != nil {

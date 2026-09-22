@@ -92,30 +92,46 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([
 	return claims, nil
 }
 func (s *Store) Confirm(ctx context.Context, c outbox.Claim) error {
-	return s.update(ctx, c, bson.M{"state": "published", "last_error_code": ""}, true)
+	return s.update(ctx, c, bson.M{"state": "published", "last_error_code": ""}, true, 0)
 }
-func (s *Store) Retry(ctx context.Context, c outbox.Claim, due time.Time, code string) error {
-	if due.IsZero() || code == "" || len(code) > 128 {
-		return errors.New("retry requires due time and bounded code")
+func (s *Store) Retry(ctx context.Context, c outbox.Claim, delay time.Duration, code string) error {
+	if delay <= 0 || code == "" || len(code) > 128 {
+		return errors.New("retry requires positive delay and bounded code")
 	}
-	return s.update(ctx, c, bson.M{"state": "retry_wait", "next_attempt_at": due.UTC(), "last_error_code": code}, false)
+	return s.update(ctx, c, bson.M{"state": "retry_wait", "last_error_code": code}, false, delay)
 }
 func (s *Store) Quarantine(ctx context.Context, c outbox.Claim, code string) error {
 	if code == "" || len(code) > 128 {
 		return errors.New("bounded quarantine code required")
 	}
-	return s.update(ctx, c, bson.M{"state": "quarantined", "last_error_code": code}, false)
+	return s.update(ctx, c, bson.M{"state": "quarantined", "last_error_code": code}, false, 0)
 }
-func (s *Store) update(ctx context.Context, c outbox.Claim, set bson.M, confirm bool) error {
+func (s *Store) update(ctx context.Context, c outbox.Claim, set bson.M, confirm bool, delay time.Duration) error {
 	id, err := hex.DecodeString(c.RecordID)
 	if err != nil || len(id) == 0 || bson.Raw(id).Validate() != nil || c.Token == "" || c.Version == 0 {
 		return outbox.ErrStaleClaim
 	}
 	filter := bson.M{"_id": bson.Raw(id), "claim_token": c.Token, "version": c.Version, "state": "publishing", "$expr": bson.M{"$gt": bson.A{"$lease_until", "$$NOW"}}}
-	update := bson.M{"$set": set, "$unset": bson.M{"claim_token": "", "lease_until": ""}, "$inc": bson.M{"version": 1}}
-	if confirm {
-		update["$currentDate"] = bson.M{"transport_confirmed_at": true}
+	// Update pipelines treat strings beginning with '$' as expressions unless
+	// wrapped. Error codes are data, never Mongo expressions.
+	fields := bson.M{}
+	for key, value := range set {
+		fields[key] = bson.M{"$literal": value}
 	}
+	fields["claim_token"] = "$$REMOVE"
+	fields["lease_until"] = "$$REMOVE"
+	fields["version"] = bson.M{"$add": bson.A{"$version", 1}}
+	if confirm {
+		fields["transport_confirmed_at"] = "$$NOW"
+	}
+	if delay > 0 {
+		millis := delay / time.Millisecond
+		if delay%time.Millisecond != 0 {
+			millis++
+		}
+		fields["next_attempt_at"] = bson.M{"$dateAdd": bson.M{"startDate": "$$NOW", "unit": "millisecond", "amount": int64(millis)}}
+	}
+	update := driver.Pipeline{bson.D{{Key: "$set", Value: fields}}}
 	result, err := s.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return err

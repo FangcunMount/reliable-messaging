@@ -25,10 +25,12 @@ type Claim struct {
 }
 
 // Implementations use their database clock for lease validity. Mutations must
-// match record, state, token AND version, and reject expired claims.
+// match record, state, token AND version, and reject expired claims. Retry takes
+// a positive delay from the database clock at the conditional write, rounded up
+// to storage precision; it must not depend on the Relay host wall clock.
 type Store interface {
 	ClaimDue(context.Context, int, time.Duration) ([]Claim, error)
 	Confirm(context.Context, Claim) error
-	Retry(context.Context, Claim, time.Time, string) error
+	Retry(context.Context, Claim, time.Duration, string) error
 	Quarantine(context.Context, Claim, string) error
 }

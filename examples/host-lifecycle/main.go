@@ -25,9 +25,9 @@ func (s *exampleStore) ClaimDue(context.Context, int, time.Duration) ([]outbox.C
 	s.claimed = true
 	return []outbox.Claim{{Message: s.message}}, nil
 }
-func (s *exampleStore) Confirm(context.Context, outbox.Claim) error                  { s.confirmed = true; return nil }
-func (s *exampleStore) Retry(context.Context, outbox.Claim, time.Time, string) error { return nil }
-func (s *exampleStore) Quarantine(context.Context, outbox.Claim, string) error       { return nil }
+func (s *exampleStore) Confirm(context.Context, outbox.Claim) error                      { s.confirmed = true; return nil }
+func (s *exampleStore) Retry(context.Context, outbox.Claim, time.Duration, string) error { return nil }
+func (s *exampleStore) Quarantine(context.Context, outbox.Claim, string) error           { return nil }
 
 type examplePublisher struct{ started, release chan struct{} }
 
