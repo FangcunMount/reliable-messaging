@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/FangcunMount/reliable-messaging/message"
 )
 
 var fields = []string{"producer", "message_id", "destination", "event_type", "schema_version", "tenant", "content_type", "occurred_at", "payload"}
@@ -113,5 +115,46 @@ func verifyVectors(path string) error {
 func TestIdentityReferenceVectors(t *testing.T) {
 	if err := verifyVectors("../../contracts/fixtures/identity-vectors.json"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Host wire validation stays outside the generic SDK: invalid host envelopes
+// may still be well-formed immutable delivery intents.
+func TestSDKIdentityAndPayloadOwnership(t *testing.T) {
+	raw, err := os.ReadFile("../../contracts/fixtures/identity-vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Cases []vector `json:"cases"`
+	}
+	if err = json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range file.Cases {
+		t.Run(v.Name, func(t *testing.T) {
+			x := v.Message
+			in := message.Input{Producer: x["producer"], ID: x["message_id"], Destination: x["destination"], EventType: x["event_type"], SchemaVersion: x["schema_version"], Scope: x["tenant"], ContentType: x["content_type"], OccurredAt: x["occurred_at"], Payload: []byte(x["payload"])}
+			m, err := message.New(in)
+			if x["producer"] == "" {
+				if err == nil {
+					t.Fatal("missing identity accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash := m.Fingerprint()
+			if hex.EncodeToString(hash[:]) != v.Fingerprint {
+				t.Fatal("SDK differs from contract vector")
+			}
+			in.Payload[0] = '!'
+			out := m.Input()
+			out.Payload[0] = '?'
+			if string(m.Input().Payload) != x["payload"] || m.Fingerprint() != hash {
+				t.Fatal("payload aliased")
+			}
+		})
 	}
 }

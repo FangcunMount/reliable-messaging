@@ -6,7 +6,7 @@ services:
     tmpfs:
       - /var/lib/mysql:size=1g
     healthcheck:
-      test: [CMD-SHELL, "mysql -uroot -N -e 'SELECT 1' | grep -qx 1"]
+      test: [CMD-SHELL, "mysql --protocol=TCP -h127.0.0.1 -uroot -N -e 'SELECT 1' | grep -qx 1"]
       interval: 2s
       timeout: 5s
       retries: 60

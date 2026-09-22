@@ -45,6 +45,11 @@ build_dir=$(mktemp -d "${TMPDIR:-/tmp}/$project-build.XXXXXX")
 "${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_example_test'
 "${compose[@]}" exec -T -e RM_EXAMPLE_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_example_test' mysql /tmp/transaction-example
 (cd "$repo" && go run ./examples/host-lifecycle)
+(cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/mysql-integration" ./tests/integration)
+"${compose[@]}" cp "$build_dir/mysql-integration" mysql:/tmp/mysql-integration
+"${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_sdk_test'
+"${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' mysql /tmp/mysql-integration -test.v
+
 
 "${compose[@]}" exec -T mongo mongosh --quiet --file /dev/stdin < "$repo/tests/integration/mongo-smoke.js"
 
