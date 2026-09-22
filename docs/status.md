@@ -12,4 +12,4 @@ Reference selection: extract a small core over mature drivers. Watermill default
 
 qs-server #127 additionally carries a host atomic-submission candidate and real runtime-checkpoint duplicate/authorized-retry proofs. These are partial consumer-boundary evidence, not full service cutover or unknown-model-call acceptance.
 
-The [M2 acceptance gap index](m2-acceptance-gaps.md) maps each task to evidence and outstanding work. The next priorities are historical IAM status/token feasibility and QS broker ACK-loss through its business boundary.
+The [M2 acceptance gap index](m2-acceptance-gaps.md) maps each task to evidence and outstanding work. Historical IAM token-field feasibility and QS FIN-loss through the original consumer/gRPC/business boundary now have direct proofs. Next, close applicable broker-restart faults and assemble the candidate API/behavior review.
