@@ -1,0 +1,11 @@
+# Mongo original-transaction proof (provisional)
+
+This adapter targets the host's pinned mongo-driver v1.17.6. Pass the `mongo.SessionContext` from the existing `WithTransaction` callback and a collection from the same client. The adapter neither starts nor commits transactions. Prepare message identity and raw bytes before entering a callback that can run again; re-bind inside each callback invocation.
+
+A SessionContext alone does not prove there is a transaction. Both Bind and Append check the underlying session's running transaction state. Driver v1 exposes this only through deprecated, unstable `mongo.XSession`; that single use is isolated and explicitly lint-annotated. Driver upgrades require re-verifying this guard. Missing, inactive and completed transaction scopes fail closed. Sessions must not be used concurrently, per driver semantics.
+
+The proof uses a standard document with an embedded `_id` identity tuple and immutable fingerprint. Repeated identical appends are idempotent; conflicting content returns ErrConflict and the host must abort its transaction. It is not qs-server's historical document schema. A standard-schema claim Store now uses atomic FindOneAndUpdate, database $$NOW for expiry/leases, and token/version/state/expiry conditions for writes. Claim.RecordID is opaque: SQL uses canonical decimal keys and Mongo uses encoded BSON identity tuples. Historical field/token mapping remains unimplemented. Public API remains provisional.
+
+Real replica-set tests exercise commit, rollback, deterministic callback reentry, unchanged raw bytes and identity conflicts. Callback reentry is induced by a labeled callback error after actual writes, so it proves driver retry and transaction rollback, not a real election/network fault. A separate isolated server failpoint injects an unknown commit result and checks that the driver repeats commit without re-running business code. Production never enables these test commands.
+
+Host installs the provided indexes explicitly. Query plans for $$NOW expressions, retention and production-scale load must be checked before service rollout. Partial claim failures can leave acquired rows awaiting lease recovery; they never erase durable intent. Millisecond lease precision applies to this adapter.

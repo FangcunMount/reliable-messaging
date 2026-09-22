@@ -45,8 +45,14 @@ build_dir=$(mktemp -d "${TMPDIR:-/tmp}/$project-build.XXXXXX")
 "${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_example_test'
 "${compose[@]}" exec -T -e RM_EXAMPLE_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_example_test' mysql /tmp/transaction-example
 (cd "$repo" && go run ./examples/host-lifecycle)
-
 "${compose[@]}" exec -T mongo mongosh --quiet --file /dev/stdin < "$repo/tests/integration/mongo-smoke.js"
+(cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/mysql-integration" ./tests/integration)
+"${compose[@]}" cp "$build_dir/mysql-integration" mysql:/tmp/mysql-integration
+"${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_sdk_test'
+"${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' -e RM_TEST_MONGO_URI='mongodb://mongo:27017/?replicaSet=rm-test' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/mysql-integration -test.v
+
+
+
 
 "${compose[@]}" exec -T nsqd sh -ec '
   wget -qO- --post-data="" "http://127.0.0.1:4151/topic/create?topic=rm-smoke"
@@ -69,4 +75,22 @@ try:
 finally:
     path.unlink(missing_ok=True)
 PY
-echo 'PASS isolated infrastructure probes; SDK fault matrix is not implemented yet'
+# Restart only the dedicated broker; the per-project volume survives this stop
+# and is removed by the existing cleanup trap. MySQL/Mongo remain running.
+(cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -o "$build_dir/broker-restart" ./tests/integration/brokerrestart)
+"${compose[@]}" cp "$build_dir/broker-restart" mysql:/tmp/broker-restart
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart seed /tmp/rm-restart-manifest.json rm-restart
+"${compose[@]}" stop --timeout 15 nsqd
+broker_id=$("${compose[@]}" ps -a -q nsqd)
+[[ $(docker inspect --format '{{.State.ExitCode}}' "$broker_id") == 0 ]] || { echo 'Broker did not stop gracefully' >&2; exit 1; }
+"${compose[@]}" up -d --wait --wait-timeout 60 nsqd
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart recover /tmp/rm-restart-manifest.json rm-restart
+# Characterize the weaker abrupt-crash boundary separately. This intentionally
+# verifies loss of confirmed memory-only messages, not successful recovery.
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart seed /tmp/rm-crash-manifest.json rm-crash
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart buffered /tmp/rm-crash-manifest.json rm-crash
+"${compose[@]}" kill --signal SIGKILL nsqd
+[[ $(docker inspect --format '{{.State.ExitCode}}' "$broker_id") == 137 ]] || { echo 'Broker SIGKILL was not observed' >&2; exit 1; }
+"${compose[@]}" up -d --wait --wait-timeout 60 nsqd
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart lost /tmp/rm-crash-manifest.json rm-crash
+echo 'PASS implemented tests; abrupt broker crash durability is NOT guaranteed and the full fault matrix remains incomplete'
