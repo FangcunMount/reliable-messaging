@@ -45,13 +45,14 @@ build_dir=$(mktemp -d "${TMPDIR:-/tmp}/$project-build.XXXXXX")
 "${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_example_test'
 "${compose[@]}" exec -T -e RM_EXAMPLE_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_example_test' mysql /tmp/transaction-example
 (cd "$repo" && go run ./examples/host-lifecycle)
+"${compose[@]}" exec -T mongo mongosh --quiet --file /dev/stdin < "$repo/tests/integration/mongo-smoke.js"
 (cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/mysql-integration" ./tests/integration)
 "${compose[@]}" cp "$build_dir/mysql-integration" mysql:/tmp/mysql-integration
 "${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_sdk_test'
-"${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/mysql-integration -test.v
+"${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' -e RM_TEST_MONGO_URI='mongodb://mongo:27017/?replicaSet=rm-test' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/mysql-integration -test.v
 
 
-"${compose[@]}" exec -T mongo mongosh --quiet --file /dev/stdin < "$repo/tests/integration/mongo-smoke.js"
+
 
 "${compose[@]}" exec -T nsqd sh -ec '
   wget -qO- --post-data="" "http://127.0.0.1:4151/topic/create?topic=rm-smoke"

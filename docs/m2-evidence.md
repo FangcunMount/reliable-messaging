@@ -46,3 +46,16 @@ Source inspection of pinned producer.go showed that Publish/PublishAsync do not 
 Unit/race tests cover preserved route/bytes, conservative outcome classification, calls after drain, timeout capacity retention and observable incomplete drain. The real NSQ test uses a TCP proxy to drop the PUB OK after acceptance, then retries via a direct connection and compares both consumed bodies. Test setup must create topic before channel and use a broker-valid heartbeat below the driver read timeout; initial setup failures are not fault-test success.
 
 Real NSQ 1.3.0 lost-confirmation test passed after correcting setup. Both physical deliveries retained exact original bytes, first attempt was Unknown and retry Confirmed. The full isolated integration run passed and cleaned its resources. This is not evidence of host consumer idempotency, process-crash recovery or synchronous disk durability.
+
+## M2-04: GORM and Mongo transaction bridge proofs
+
+Source checks reconfirmed IAM authz uses its GORM UoW and qs-server wraps mongo Session.WithTransaction. Added `BindGORM` for the existing GORM 1.30.0 plain/prepared original SQL transaction handles; ordinary DB handles and unsupported wrappers fail closed. Real MySQL tests passed original business+intent commit/rollback for both modes and rejected completed-transaction reuse. This is not yet an invocation of IAM's actual UoW or its old schema.
+
+Added a provisional Mongo v1.17.6 original-session Appender. Mongo v1 lacks a stable transaction-state accessor, so the adapter confines one explicit XSession compatibility dependency to storage/mongo. A SessionContext without an active transaction and retained appenders after commit are rejected. Standard proof documents preserve the identity tuple, original bytes and fingerprint, including callback reentry. qs-server historical fields, claim token changes and the numeric-only Claim ID interface remain open before API acceptance.
+
+Replica-set tests for original transaction commit/rollback, callback retry, duplicate identity/conflict and payload preservation passed. The callback retry is induced through a labeled callback error after real writes, not through an actual primary election. Commit-unknown failpoint evidence is recorded separately after execution.
+
+
+The real commit-unknown experiment passed: Mongo 7.0.37 `failCommand` injected a write-concern error labeled UnknownTransactionCommitResult on the first commit response. Command monitoring observed two commit commands, one injected unknown response and exactly one business callback; both collections held one committed record. This proves the pinned driver's resolved-unknown commit retry path, not indefinitely unresolved commits or failover recovery. Test commands are enabled only on this invocation's isolated Mongo container. The first attempt failed because RunCommand requires an ordered document; the corrected run passed all integration cases and cleaned resources.
+
+Local check/race and lint passed for the GORM/Mongo implementation; full isolated integration passed after adding commit-unknown injection. Previous head cb053f0 passed all four CI jobs. This is still M2 work in progress: actual IAM UoW/old schema, qs-server historical document/token mapping, shared Claim identity, unresolved commit reconciliation and end-to-end consumer fault proofs are not accepted.
