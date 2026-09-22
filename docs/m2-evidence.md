@@ -90,3 +90,14 @@ The test owns a separate temporary DB per case and kills/reaps its child process
 ## Service draft CI follow-up
 
 IAM #93 at 7c262f0e passed Analyze, Lint, Run Tests and Build. SDK 56f8eea passed all four jobs. qs-server #127 initially failed Docs Hygiene because the new sidecar was missing from document-closure.json and its source baseline had moved. Commit 42d10cb82 registers the test-only document as needs_review and updates the source baseline; local `make docs-facts` passed. Its new CI remains separate. Normal service jobs do not execute cross-repo tagged transaction proofs.
+
+
+## M2-05: original IAM consumer and qs-server failure-hold compatibility
+
+IAM #93 commit 038df0b2 adds real NSQ/MySQL consumer proof against SDK d13ee10. Two actual policypublication handlers and immutable runtimes use MySQLSource and separate test channels. A TCP proxy drops each first FIN after successful processing; broker redelivery preserves the NSQ message ID and increments attempts. Both instances avoid reloading already-loaded versions, reject regression from older versions, and recover a deliberately unpublished DB version via the original Reconcile. Invalid version payloads remain errors. Separate test channels prove broadcast but not production ephemeral-channel lifecycle.
+
+The first ACK-loss fixture disabled auto-response locally and failed shutdown because go-nsq retained in-flight accounting. It was replaced by dropping FIN on the wire; the corrected run passed and both consumers/proxies drained. This is actual broker ACK-loss/redelivery, not two manual handler calls.
+
+qs-server #127 commit 583739a89 uses the original dispatch settlement handler and mysqlRetryEventHoldStore with the exact 000050 schema in real MySQL. Injected dispatcher pause and ACK failure prove ACK occurs after the durable hold. Redelivery does not reset manual_required, replay count, manual request or original bytes. A real trigger rejects the next hold: the original handler NACKs/returns error without acknowledging an unpersisted record. Dispatcher/ACK boundaries are controlled injections; this does not prove the Assessment intake's business idempotency or network ACK loss for qs-server.
+
+Both extended isolated scripts passed and removed resources. Service module files/production wiring are unchanged. New service CI remains separate; normal jobs exclude these cross-repository tagged proofs. qs-server document registration/source baseline is maintained alongside the additional proof, with local docs-facts passing.
