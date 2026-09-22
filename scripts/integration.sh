@@ -75,4 +75,14 @@ try:
 finally:
     path.unlink(missing_ok=True)
 PY
+# Restart only the dedicated broker; the per-project volume survives this stop
+# and is removed by the existing cleanup trap. MySQL/Mongo remain running.
+(cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -o "$build_dir/broker-restart" ./tests/integration/brokerrestart)
+"${compose[@]}" cp "$build_dir/broker-restart" mysql:/tmp/broker-restart
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart seed /tmp/rm-restart-manifest.json
+"${compose[@]}" stop --timeout 15 nsqd
+broker_id=$("${compose[@]}" ps -a -q nsqd)
+[[ $(docker inspect --format '{{.State.ExitCode}}' "$broker_id") == 0 ]] || { echo 'Broker did not stop gracefully' >&2; exit 1; }
+"${compose[@]}" up -d --wait --wait-timeout 60 nsqd
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart recover /tmp/rm-restart-manifest.json
 echo 'PASS isolated infrastructure and implemented SDK tests; full fault matrix remains incomplete'

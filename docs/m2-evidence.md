@@ -119,3 +119,12 @@ Validation: make check (including race), make lint, integration-tag vet and the 
 This is a database/Relay fencing and observation test, not a real broker test. The deliberately non-cooperative publisher models a delayed old execution; it does not promise shutdown for arbitrary callbacks that never return. Initial test construction exposed a wrong SQL column name and cross-test row leakage; both were corrected, with identity-scoped cleanup and bounded drain. Final full-suite result is recorded below.
 
 Final verification: complete isolated integration passed after fixture cleanup correction; check/race, lint and integration-tag vet passed. All child/Relay work and dedicated containers were drained/removed. SDK d2cdbdd four CI jobs passed; the new test commit has separate CI. See [remaining M2 gates](m2-acceptance-gaps.md) for the direct-evidence map.
+
+
+## Graceful broker restart with original data volume
+
+The isolated Compose nsqd now uses a uniquely project-scoped named volume (removed by down --volumes), while MySQL/Mongo remain on tmpfs. The restart fixture creates a durable channel, publishes 10 distinct application identities/raw bodies through the SDK NSQ adapter and records the confirmed set. The shell stops only its broker, requires exit code 0, starts it with the same volume and pinned image, then a real consumer verifies 10/10 original application identities and exact bytes. NSQ queue/sync settings are explicitly 3000/2500/2s, matching the observed M0 values.
+
+This tests graceful-stop flushing and restart recovery. It does not establish SIGKILL, operating-system power-loss, fsync-per-confirmation, lost-disk/node or replicated durability; those must remain explicit fault-model limits or have separate evidence/compensation. The seed/recover fixture uses no production addresses or persistent business resources. The initial helper location violated the existing driver-boundary check; it was moved under tests/integration without weakening that check.
+
+Final verification passed: make check/race, lint, integration-tag vet, shell syntax and the complete isolated suite including seed/real stop-start/recover. The dedicated volume and all project containers/networks were removed.
