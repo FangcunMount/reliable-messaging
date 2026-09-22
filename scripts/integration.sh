@@ -79,10 +79,18 @@ PY
 # and is removed by the existing cleanup trap. MySQL/Mongo remain running.
 (cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -o "$build_dir/broker-restart" ./tests/integration/brokerrestart)
 "${compose[@]}" cp "$build_dir/broker-restart" mysql:/tmp/broker-restart
-"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart seed /tmp/rm-restart-manifest.json
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart seed /tmp/rm-restart-manifest.json rm-restart
 "${compose[@]}" stop --timeout 15 nsqd
 broker_id=$("${compose[@]}" ps -a -q nsqd)
 [[ $(docker inspect --format '{{.State.ExitCode}}' "$broker_id") == 0 ]] || { echo 'Broker did not stop gracefully' >&2; exit 1; }
 "${compose[@]}" up -d --wait --wait-timeout 60 nsqd
-"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart recover /tmp/rm-restart-manifest.json
-echo 'PASS isolated infrastructure and implemented SDK tests; full fault matrix remains incomplete'
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart recover /tmp/rm-restart-manifest.json rm-restart
+# Characterize the weaker abrupt-crash boundary separately. This intentionally
+# verifies loss of confirmed memory-only messages, not successful recovery.
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart seed /tmp/rm-crash-manifest.json rm-crash
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart buffered /tmp/rm-crash-manifest.json rm-crash
+"${compose[@]}" kill --signal SIGKILL nsqd
+[[ $(docker inspect --format '{{.State.ExitCode}}' "$broker_id") == 137 ]] || { echo 'Broker SIGKILL was not observed' >&2; exit 1; }
+"${compose[@]}" up -d --wait --wait-timeout 60 nsqd
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/broker-restart lost /tmp/rm-crash-manifest.json rm-crash
+echo 'PASS implemented tests; abrupt broker crash durability is NOT guaranteed and the full fault matrix remains incomplete'
