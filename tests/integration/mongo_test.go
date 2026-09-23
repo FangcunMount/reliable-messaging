@@ -125,11 +125,15 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 		t.Fatal("content conflict not rejected", err)
 	}
 	var record struct {
-		Payload []byte `bson:"payload"`
+		Payload   []byte    `bson:"payload"`
+		CreatedAt time.Time `bson:"created_at"`
 	}
 	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&record))
 	if string(record.Payload) != string(m.Input().Payload) {
 		t.Fatal("original bytes lost")
+	}
+	if record.CreatedAt.IsZero() || time.Since(record.CreatedAt) < 0 || time.Since(record.CreatedAt) > time.Minute {
+		t.Fatalf("standard document has no usable creation time: %s", record.CreatedAt)
 	}
 	s, err := adapter.New(db.Collection("outbox"))
 	must(err)
