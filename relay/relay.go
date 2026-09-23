@@ -84,6 +84,9 @@ func (r *Relay) Run(ctx context.Context) error {
 		if len(claims) > r.config.Concurrency {
 			return errors.New("store exceeded requested claim limit")
 		}
+		// Hosts use this bounded signal to clear scan-failure health only after
+		// a real store scan succeeds, including when no rows are due.
+		r.config.Observe(Event{Kind: "scan_succeeded"})
 		var wg sync.WaitGroup
 		for _, claim := range claims {
 			if ctx.Err() != nil {

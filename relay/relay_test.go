@@ -224,7 +224,7 @@ func TestOutcomeAndWriteFailure(t *testing.T) {
 			if err = r.Run(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if len(s.writes) != 1 || s.writes[0] != tc.want || len(events) != 2 || events[1].Kind != tc.event {
+			if len(s.writes) != 1 || s.writes[0] != tc.want || len(events) != 3 || events[0].Kind != "scan_succeeded" || events[2].Kind != tc.event {
 				t.Fatalf("wrong result: %v %v", s.writes, events)
 			}
 		})
