@@ -139,6 +139,45 @@ func TestMissedPostCommitWakeStillUsesPeriodicScan(t *testing.T) {
 	}
 }
 
+func TestFullBatchContinuesWithoutWaitingForPollInterval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &fakeStore{claims: make([]outbox.Claim, 3)}
+	published := make(chan struct{}, 3)
+	c := config()
+	c.PollInterval = time.Hour
+	r, err := New(s, publishFunc(func(context.Context, message.Message) transport.Result {
+		published <- struct{}{}
+		return transport.Result{Outcome: transport.Confirmed}
+	}), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	for range 3 {
+		select {
+		case <-published:
+		case <-time.After(time.Second):
+			t.Fatal("full batch waited for poll interval before draining backlog")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay did not drain after cancellation")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.writes) != 3 || s.scans != 2 {
+		t.Fatalf("drained %d messages in %d scans, want 3 in 2", len(s.writes), s.scans)
+	}
+}
+
 func TestBoundedDrainAndSingleRunner(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

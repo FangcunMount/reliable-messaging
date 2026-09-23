@@ -99,6 +99,12 @@ func (r *Relay) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		// A full claim means more rows may already be due. Drain the next
+		// bounded batch now; the periodic scan still covers partial or empty
+		// batches and lost wake hints.
+		if len(claims) == r.config.Concurrency {
+			continue
+		}
 		timer := time.NewTimer(r.config.PollInterval)
 		select {
 		case <-ctx.Done():
