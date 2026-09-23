@@ -34,8 +34,11 @@ type Observer func(Event)
 type Config struct {
 	Concurrency                                       int
 	PollInterval, Lease, PublishTimeout, WriteTimeout time.Duration
-	Retry                                             RetryPolicy
-	Observe                                           Observer
+	// Wake is an optional, lossy post-commit hint. The periodic scan remains
+	// authoritative when notifications are missed or the host restarts.
+	Wake    <-chan struct{}
+	Retry   RetryPolicy
+	Observe Observer
 }
 type Relay struct {
 	store     outbox.Store
@@ -65,6 +68,7 @@ func (r *Relay) Run(ctx context.Context) error {
 		return errors.New("relay already running")
 	}
 	defer r.running.Store(false)
+	wake := r.config.Wake
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -97,6 +101,11 @@ func (r *Relay) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			timer.Stop()
 			return nil
+		case _, open := <-wake:
+			timer.Stop()
+			if !open {
+				wake = nil
+			}
 		case <-timer.C:
 		}
 	}

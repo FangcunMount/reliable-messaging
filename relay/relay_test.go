@@ -16,6 +16,7 @@ type fakeStore struct {
 	mu       sync.Mutex
 	claims   []outbox.Claim
 	scans    int
+	scanCh   chan struct{}
 	writes   []string
 	writeErr error
 	cancel   context.CancelFunc
@@ -25,6 +26,12 @@ func (s *fakeStore) ClaimDue(_ context.Context, n int, _ time.Duration) ([]outbo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.scans++
+	if s.scanCh != nil {
+		select {
+		case s.scanCh <- struct{}{}:
+		default:
+		}
+	}
 	if n > len(s.claims) {
 		n = len(s.claims)
 	}
@@ -59,6 +66,77 @@ func (f publishFunc) Publish(ctx context.Context, m message.Message) transport.R
 }
 func config() Config {
 	return Config{Concurrency: 2, PollInterval: time.Millisecond, Lease: time.Second, PublishTimeout: 100 * time.Millisecond, WriteTimeout: 100 * time.Millisecond, Retry: func(outbox.Claim, transport.Outcome) RetryDecision { return RetryDecision{Delay: time.Second} }, Observe: func(Event) {}}
+}
+
+func TestPostCommitWakeRescansWithoutWaitingForPollInterval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &fakeStore{scanCh: make(chan struct{}, 2)}
+	wake := make(chan struct{}, 1)
+	c := config()
+	c.PollInterval = time.Hour
+	c.Wake = wake
+	r, err := New(s, publishFunc(func(context.Context, message.Message) transport.Result {
+		return transport.Result{Outcome: transport.Confirmed}
+	}), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	select {
+	case <-s.scanCh:
+	case <-time.After(time.Second):
+		t.Fatal("initial scan did not start")
+	}
+	wake <- struct{}{}
+	select {
+	case <-s.scanCh:
+	case <-time.After(time.Second):
+		t.Fatal("post-commit wake did not trigger a scan")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay did not stop")
+	}
+}
+
+func TestMissedPostCommitWakeStillUsesPeriodicScan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &fakeStore{scanCh: make(chan struct{}, 2)}
+	c := config()
+	c.PollInterval = 20 * time.Millisecond
+	c.Wake = make(chan struct{}) // No notification arrives.
+	r, err := New(s, publishFunc(func(context.Context, message.Message) transport.Result {
+		return transport.Result{Outcome: transport.Confirmed}
+	}), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	for range 2 {
+		select {
+		case <-s.scanCh:
+		case <-time.After(time.Second):
+			t.Fatal("periodic recovery scan did not run")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay did not stop")
+	}
 }
 
 func TestBoundedDrainAndSingleRunner(t *testing.T) {
