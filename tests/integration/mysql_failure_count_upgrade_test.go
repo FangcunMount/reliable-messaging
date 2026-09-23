@@ -15,7 +15,7 @@ import (
 	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
-func TestMySQLAdditiveFailureCountUpgrade(t *testing.T) {
+func TestMySQLAdditiveDeliveryMetadataUpgrade(t *testing.T) {
 	config, err := mysqlDriver.ParseDSN(os.Getenv("RM_TEST_MYSQL_DSN"))
 	if err != nil || config.DBName != "rm_sdk_test" || config.Addr != "127.0.0.1:3306" || config.User != "root" {
 		t.Fatal("disposable rm_sdk_test MySQL DSN required")
@@ -39,8 +39,9 @@ func TestMySQLAdditiveFailureCountUpgrade(t *testing.T) {
 	}
 	defer db.Close()
 	oldSchema := strings.Replace(store.Schema, "  failure_count BIGINT UNSIGNED NOT NULL DEFAULT 0,\n", "", 1)
-	if oldSchema == store.Schema {
-		t.Fatal("old schema fixture no longer omits failure_count")
+	oldSchema = strings.Replace(oldSchema, "  updated_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),\n", "", 1)
+	if oldSchema == store.Schema || strings.Contains(oldSchema, "updated_at DATETIME") {
+		t.Fatal("old schema fixture no longer omits delivery metadata")
 	}
 	if _, err := db.ExecContext(ctx, oldSchema); err != nil {
 		t.Fatal(err)
@@ -85,6 +86,12 @@ func TestMySQLAdditiveFailureCountUpgrade(t *testing.T) {
 		t.Fatal("new store unexpectedly accepted schema without failure_count")
 	}
 	if _, err := db.ExecContext(ctx, "ALTER TABLE rm_outbox ADD COLUMN failure_count BIGINT UNSIGNED NOT NULL DEFAULT 0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimDue(ctx, 1, time.Minute); err == nil {
+		t.Fatal("new store unexpectedly accepted schema without updated_at")
+	}
+	if _, err := db.ExecContext(ctx, "ALTER TABLE rm_outbox ADD COLUMN updated_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6))"); err != nil {
 		t.Fatal(err)
 	}
 	// The old Appender SQL still works after the additive column arrives.

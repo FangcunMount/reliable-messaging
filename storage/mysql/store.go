@@ -125,7 +125,7 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([
 		if decodeErr != nil || !bytes.Equal(c.fingerprint, fingerprint[:]) {
 			// This row is still locked. Corruption is preserved and made visible,
 			// rather than starving every valid record behind it indefinitely.
-			if _, err := tx.ExecContext(ctx, `UPDATE rm_outbox SET state='quarantined',last_error_code='invalid_immutable_content',failure_count=failure_count+1,claim_token=NULL,lease_until=NULL,version=version+1 WHERE id=? AND version=?`, c.claim.RecordID, c.claim.Version); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE rm_outbox SET state='quarantined',last_error_code='invalid_immutable_content',failure_count=failure_count+1,claim_token=NULL,lease_until=NULL,version=version+1,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND version=?`, c.claim.RecordID, c.claim.Version); err != nil {
 				return nil, err
 			}
 			continue
@@ -137,7 +137,7 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([
 		c.claim.Token = hex.EncodeToString(token[:])
 		c.claim.LeaseUntil = now.Add(lease).Truncate(time.Microsecond)
 		c.claim.Message = m
-		if _, err := tx.ExecContext(ctx, `UPDATE rm_outbox SET state='publishing',claim_token=?,lease_until=?,version=version+1,attempt_count=attempt_count+1 WHERE id=? AND version=?`, c.claim.Token, c.claim.LeaseUntil.Format(databaseTimeLayout), c.claim.RecordID, c.claim.Version); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE rm_outbox SET state='publishing',claim_token=?,lease_until=?,version=version+1,attempt_count=attempt_count+1,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND version=?`, c.claim.Token, c.claim.LeaseUntil.Format(databaseTimeLayout), c.claim.RecordID, c.claim.Version); err != nil {
 			return nil, err
 		}
 		c.claim.Version++
@@ -175,7 +175,7 @@ func (s *Store) update(ctx context.Context, c outbox.Claim, set string, args ...
 		return outbox.ErrStaleClaim
 	}
 	args = append(args, id, c.Token, c.Version)
-	result, err := s.db.ExecContext(ctx, `UPDATE rm_outbox SET `+set+`,claim_token=NULL,lease_until=NULL,version=version+1
+	result, err := s.db.ExecContext(ctx, `UPDATE rm_outbox SET `+set+`,claim_token=NULL,lease_until=NULL,version=version+1,updated_at=UTC_TIMESTAMP(6)
  WHERE id=? AND claim_token=? AND version=? AND state='publishing' AND lease_until>UTC_TIMESTAMP(6)`, args...)
 	if err != nil {
 		return err

@@ -127,6 +127,7 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 	var record struct {
 		Payload   []byte    `bson:"payload"`
 		CreatedAt time.Time `bson:"created_at"`
+		UpdatedAt time.Time `bson:"updated_at"`
 	}
 	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&record))
 	if string(record.Payload) != string(m.Input().Payload) {
@@ -135,14 +136,23 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 	if record.CreatedAt.IsZero() || time.Since(record.CreatedAt) < 0 || time.Since(record.CreatedAt) > time.Minute {
 		t.Fatalf("standard document has no usable creation time: %s", record.CreatedAt)
 	}
+	if record.UpdatedAt.IsZero() || record.UpdatedAt.Sub(record.CreatedAt).Abs() > time.Millisecond {
+		t.Fatalf("new Mongo record lacks original update time: created=%s updated=%s", record.CreatedAt, record.UpdatedAt)
+	}
 	s, err := adapter.New(db.Collection("outbox"))
 	must(err)
 	_, err = db.Collection("outbox").Indexes().CreateMany(ctx, adapter.Indexes())
+	must(err)
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"updated_at": time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)}})
 	must(err)
 	claims, err := s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 1 {
 		t.Fatalf("claims %d", len(claims))
+	}
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&record))
+	if time.Since(record.UpdatedAt) < 0 || time.Since(record.UpdatedAt) > time.Minute {
+		t.Fatalf("claim did not advance Mongo update time: %s", record.UpdatedAt)
 	}
 	old := claims[0]
 	if old.FailureCount != 0 {
@@ -177,7 +187,13 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 			t.Fatal("nonpositive retry delay accepted")
 		}
 	}
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"updated_at": time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)}})
+	must(err)
 	must(s.Retry(ctx, fresh, time.Hour, "$literal-error"))
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&record))
+	if time.Since(record.UpdatedAt) < 0 || time.Since(record.UpdatedAt) > time.Minute {
+		t.Fatalf("failed transition did not advance Mongo update time: %s", record.UpdatedAt)
+	}
 	var retried struct {
 		FailureCount uint64 `bson:"failure_count"`
 	}

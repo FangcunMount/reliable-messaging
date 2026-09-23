@@ -61,6 +61,11 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 		}
 	}
 	appendTx(1, true)
+	var updateAgeSeconds int64
+	must(db.QueryRowContext(ctx, "SELECT TIMESTAMPDIFF(SECOND,updated_at,UTC_TIMESTAMP(6)) FROM rm_outbox WHERE message_id='committed'").Scan(&updateAgeSeconds))
+	if updateAgeSeconds < 0 || updateAgeSeconds > 60 {
+		t.Fatalf("new MySQL record has no UTC update time: age=%d", updateAgeSeconds)
+	}
 	in.ID = "rolled-back"
 	appendTx(2, false)
 	var n int
@@ -89,10 +94,16 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 	must(tx.Rollback())
 	s, err := store.New(db)
 	must(err)
+	_, err = db.ExecContext(ctx, "UPDATE rm_outbox SET updated_at='2020-01-01 00:00:00' WHERE message_id='committed'")
+	must(err)
 	claims, err := s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 1 {
 		t.Fatalf("claims: %d", len(claims))
+	}
+	must(db.QueryRowContext(ctx, "SELECT TIMESTAMPDIFF(SECOND,updated_at,UTC_TIMESTAMP(6)) FROM rm_outbox WHERE message_id='committed'").Scan(&updateAgeSeconds))
+	if updateAgeSeconds < 0 || updateAgeSeconds > 60 {
+		t.Fatalf("claim did not advance MySQL update time: age=%d", updateAgeSeconds)
 	}
 	old := claims[0]
 	if old.FailureCount != 0 {
@@ -128,7 +139,13 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 			t.Fatal("nonpositive retry delay accepted")
 		}
 	}
+	_, err = db.ExecContext(ctx, "UPDATE rm_outbox SET updated_at='2020-01-01 00:00:00' WHERE message_id='committed'")
+	must(err)
 	must(s.Retry(ctx, fresh, time.Hour, "unknown"))
+	must(db.QueryRowContext(ctx, "SELECT TIMESTAMPDIFF(SECOND,updated_at,UTC_TIMESTAMP(6)) FROM rm_outbox WHERE message_id='committed'").Scan(&updateAgeSeconds))
+	if updateAgeSeconds < 0 || updateAgeSeconds > 60 {
+		t.Fatalf("failed transition did not advance MySQL update time: age=%d", updateAgeSeconds)
+	}
 	var failures uint64
 	must(db.QueryRowContext(ctx, "SELECT failure_count FROM rm_outbox WHERE id=?", fresh.RecordID).Scan(&failures))
 	if failures != 1 {
