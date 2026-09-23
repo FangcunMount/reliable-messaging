@@ -16,6 +16,7 @@ type fakeStore struct {
 	mu       sync.Mutex
 	claims   []outbox.Claim
 	scans    int
+	scanCh   chan struct{}
 	writes   []string
 	writeErr error
 	cancel   context.CancelFunc
@@ -25,6 +26,12 @@ func (s *fakeStore) ClaimDue(_ context.Context, n int, _ time.Duration) ([]outbo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.scans++
+	if s.scanCh != nil {
+		select {
+		case s.scanCh <- struct{}{}:
+		default:
+		}
+	}
 	if n > len(s.claims) {
 		n = len(s.claims)
 	}
@@ -59,6 +66,116 @@ func (f publishFunc) Publish(ctx context.Context, m message.Message) transport.R
 }
 func config() Config {
 	return Config{Concurrency: 2, PollInterval: time.Millisecond, Lease: time.Second, PublishTimeout: 100 * time.Millisecond, WriteTimeout: 100 * time.Millisecond, Retry: func(outbox.Claim, transport.Outcome) RetryDecision { return RetryDecision{Delay: time.Second} }, Observe: func(Event) {}}
+}
+
+func TestPostCommitWakeRescansWithoutWaitingForPollInterval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &fakeStore{scanCh: make(chan struct{}, 2)}
+	wake := make(chan struct{}, 1)
+	c := config()
+	c.PollInterval = time.Hour
+	c.Wake = wake
+	r, err := New(s, publishFunc(func(context.Context, message.Message) transport.Result {
+		return transport.Result{Outcome: transport.Confirmed}
+	}), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	select {
+	case <-s.scanCh:
+	case <-time.After(time.Second):
+		t.Fatal("initial scan did not start")
+	}
+	wake <- struct{}{}
+	select {
+	case <-s.scanCh:
+	case <-time.After(time.Second):
+		t.Fatal("post-commit wake did not trigger a scan")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay did not stop")
+	}
+}
+
+func TestMissedPostCommitWakeStillUsesPeriodicScan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &fakeStore{scanCh: make(chan struct{}, 2)}
+	c := config()
+	c.PollInterval = 20 * time.Millisecond
+	c.Wake = make(chan struct{}) // No notification arrives.
+	r, err := New(s, publishFunc(func(context.Context, message.Message) transport.Result {
+		return transport.Result{Outcome: transport.Confirmed}
+	}), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	for range 2 {
+		select {
+		case <-s.scanCh:
+		case <-time.After(time.Second):
+			t.Fatal("periodic recovery scan did not run")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay did not stop")
+	}
+}
+
+func TestFullBatchContinuesWithoutWaitingForPollInterval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &fakeStore{claims: make([]outbox.Claim, 3)}
+	published := make(chan struct{}, 3)
+	c := config()
+	c.PollInterval = time.Hour
+	r, err := New(s, publishFunc(func(context.Context, message.Message) transport.Result {
+		published <- struct{}{}
+		return transport.Result{Outcome: transport.Confirmed}
+	}), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	for range 3 {
+		select {
+		case <-published:
+		case <-time.After(time.Second):
+			t.Fatal("full batch waited for poll interval before draining backlog")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay did not drain after cancellation")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.writes) != 3 || s.scans != 2 {
+		t.Fatalf("drained %d messages in %d scans, want 3 in 2", len(s.writes), s.scans)
+	}
 }
 
 func TestBoundedDrainAndSingleRunner(t *testing.T) {
@@ -146,7 +263,7 @@ func TestOutcomeAndWriteFailure(t *testing.T) {
 			if err = r.Run(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if len(s.writes) != 1 || s.writes[0] != tc.want || len(events) != 2 || events[1].Kind != tc.event {
+			if len(s.writes) != 1 || s.writes[0] != tc.want || len(events) != 3 || events[0].Kind != "scan_succeeded" || events[2].Kind != tc.event {
 				t.Fatalf("wrong result: %v %v", s.writes, events)
 			}
 		})

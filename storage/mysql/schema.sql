@@ -16,9 +16,11 @@ CREATE TABLE IF NOT EXISTS rm_outbox (
   lease_until DATETIME(6) NULL,
   version BIGINT UNSIGNED NOT NULL DEFAULT 0,
   attempt_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  failure_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
   last_error_code VARCHAR(128) NOT NULL DEFAULT '',
   transport_confirmed_at DATETIME(6) NULL,
   created_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+  updated_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
   UNIQUE KEY identity_key (producer,message_id,destination),
   KEY due_idx (state,next_attempt_at,id),
   KEY lease_idx (state,lease_until,id)

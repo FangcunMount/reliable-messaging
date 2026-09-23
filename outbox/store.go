@@ -16,12 +16,15 @@ var (
 
 type Claim struct {
 	// RecordID is an opaque storage key. Relay must not parse or reconstruct it.
-	RecordID   string
-	Token      string
-	Version    uint64
-	Attempts   uint64
-	LeaseUntil time.Time
-	Message    message.Message
+	RecordID string
+	Token    string
+	Version  uint64
+	Attempts uint64
+	// FailureCount advances only when a conditional Retry or Quarantine
+	// transition succeeds. Reclaiming an expired lease does not advance it.
+	FailureCount uint64
+	LeaseUntil   time.Time
+	Message      message.Message
 }
 
 // Implementations use their database clock for lease validity. Mutations must

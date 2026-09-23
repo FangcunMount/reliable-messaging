@@ -48,7 +48,10 @@ func (a *Appender) Append(m message.Message, due time.Time) error {
 	in := m.Input()
 	hash := m.Fingerprint()
 	identity := bson.D{{Key: "producer", Value: in.Producer}, {Key: "message_id", Value: in.ID}, {Key: "destination", Value: in.Destination}}
-	doc := bson.M{"_id": identity, "producer": in.Producer, "message_id": in.ID, "destination": in.Destination, "event_type": in.EventType, "schema_version": in.SchemaVersion, "scope": in.Scope, "content_type": in.ContentType, "occurred_at": in.OccurredAt, "payload": in.Payload, "fingerprint": hash[:], "state": "pending", "next_attempt_at": due.UTC(), "version": int64(0)}
+	// Diagnostic age uses creation time, not the event time or retry due time.
+	// This field does not participate in delivery ordering or fencing.
+	now := time.Now().UTC()
+	doc := bson.M{"_id": identity, "producer": in.Producer, "message_id": in.ID, "destination": in.Destination, "event_type": in.EventType, "schema_version": in.SchemaVersion, "scope": in.Scope, "content_type": in.ContentType, "occurred_at": in.OccurredAt, "payload": in.Payload, "fingerprint": hash[:], "state": "pending", "next_attempt_at": due.UTC(), "created_at": now, "updated_at": now, "version": int64(0)}
 	filter := bson.M{"_id": identity}
 	if _, err := a.collection.UpdateOne(a.ctx, filter, bson.M{"$setOnInsert": doc}, options.Update().SetUpsert(true)); err != nil {
 		return err

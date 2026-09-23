@@ -34,8 +34,11 @@ type Observer func(Event)
 type Config struct {
 	Concurrency                                       int
 	PollInterval, Lease, PublishTimeout, WriteTimeout time.Duration
-	Retry                                             RetryPolicy
-	Observe                                           Observer
+	// Wake is an optional, lossy post-commit hint. The periodic scan remains
+	// authoritative when notifications are missed or the host restarts.
+	Wake    <-chan struct{}
+	Retry   RetryPolicy
+	Observe Observer
 }
 type Relay struct {
 	store     outbox.Store
@@ -65,6 +68,7 @@ func (r *Relay) Run(ctx context.Context) error {
 		return errors.New("relay already running")
 	}
 	defer r.running.Store(false)
+	wake := r.config.Wake
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -80,6 +84,9 @@ func (r *Relay) Run(ctx context.Context) error {
 		if len(claims) > r.config.Concurrency {
 			return errors.New("store exceeded requested claim limit")
 		}
+		// Hosts use this bounded signal to clear scan-failure health only after
+		// a real store scan succeeds, including when no rows are due.
+		r.config.Observe(Event{Kind: "scan_succeeded"})
 		var wg sync.WaitGroup
 		for _, claim := range claims {
 			if ctx.Err() != nil {
@@ -92,11 +99,22 @@ func (r *Relay) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		// A full claim means more rows may already be due. Drain the next
+		// bounded batch now; the periodic scan still covers partial or empty
+		// batches and lost wake hints.
+		if len(claims) == r.config.Concurrency {
+			continue
+		}
 		timer := time.NewTimer(r.config.PollInterval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return nil
+		case _, open := <-wake:
+			timer.Stop()
+			if !open {
+				wake = nil
+			}
 		case <-timer.C:
 		}
 	}

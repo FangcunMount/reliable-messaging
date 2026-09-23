@@ -125,28 +125,46 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 		t.Fatal("content conflict not rejected", err)
 	}
 	var record struct {
-		Payload []byte `bson:"payload"`
+		Payload   []byte    `bson:"payload"`
+		CreatedAt time.Time `bson:"created_at"`
+		UpdatedAt time.Time `bson:"updated_at"`
 	}
 	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&record))
 	if string(record.Payload) != string(m.Input().Payload) {
 		t.Fatal("original bytes lost")
 	}
+	if record.CreatedAt.IsZero() || time.Since(record.CreatedAt) < 0 || time.Since(record.CreatedAt) > time.Minute {
+		t.Fatalf("standard document has no usable creation time: %s", record.CreatedAt)
+	}
+	if record.UpdatedAt.IsZero() || record.UpdatedAt.Sub(record.CreatedAt).Abs() > time.Millisecond {
+		t.Fatalf("new Mongo record lacks original update time: created=%s updated=%s", record.CreatedAt, record.UpdatedAt)
+	}
 	s, err := adapter.New(db.Collection("outbox"))
 	must(err)
 	_, err = db.Collection("outbox").Indexes().CreateMany(ctx, adapter.Indexes())
+	must(err)
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"updated_at": time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)}})
 	must(err)
 	claims, err := s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 1 {
 		t.Fatalf("claims %d", len(claims))
 	}
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&record))
+	if time.Since(record.UpdatedAt) < 0 || time.Since(record.UpdatedAt) > time.Minute {
+		t.Fatalf("claim did not advance Mongo update time: %s", record.UpdatedAt)
+	}
 	old := claims[0]
+	if old.FailureCount != 0 {
+		t.Fatalf("initial failure count %d", old.FailureCount)
+	}
 	claims, err = s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 0 {
 		t.Fatal("live claim stolen")
 	}
-	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"lease_until": time.Now().Add(-time.Minute)}})
+	expiredAt := time.Now().Add(-time.Minute)
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"lease_until": expiredAt, "next_attempt_at": expiredAt}})
 	must(err)
 	if err = s.Confirm(ctx, old); !errors.Is(err, outbox.ErrStaleClaim) {
 		t.Fatal("expired confirm accepted", err)
@@ -157,7 +175,7 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 		t.Fatal("expired claim not recovered")
 	}
 	fresh := claims[0]
-	if fresh.RecordID != old.RecordID || fresh.Token == old.Token || fresh.Version <= old.Version || fresh.Attempts != 2 {
+	if fresh.RecordID != old.RecordID || fresh.Token == old.Token || fresh.Version <= old.Version || fresh.Attempts != 2 || fresh.FailureCount != 0 {
 		t.Fatal("reclaim fencing changed incorrectly")
 	}
 	for _, e := range []error{s.Confirm(ctx, old), s.Retry(ctx, old, time.Second, "unknown"), s.Quarantine(ctx, old, "invalid")} {
@@ -170,7 +188,20 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 			t.Fatal("nonpositive retry delay accepted")
 		}
 	}
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"updated_at": time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)}})
+	must(err)
 	must(s.Retry(ctx, fresh, time.Hour, "$literal-error"))
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&record))
+	if time.Since(record.UpdatedAt) < 0 || time.Since(record.UpdatedAt) > time.Minute {
+		t.Fatalf("failed transition did not advance Mongo update time: %s", record.UpdatedAt)
+	}
+	var retried struct {
+		FailureCount uint64 `bson:"failure_count"`
+	}
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&retried))
+	if retried.FailureCount != 1 {
+		t.Fatalf("retry failure count %d", retried.FailureCount)
+	}
 	cursor, e := db.Collection("outbox").Aggregate(ctx, bson.A{
 		bson.M{"$match": bson.M{"message_id": "stable"}},
 		bson.M{"$project": bson.M{"remaining_ms": bson.M{"$subtract": bson.A{"$next_attempt_at", "$$NOW"}}, "last_error_code": 1}},
@@ -197,7 +228,14 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 	if len(claims) != 1 {
 		t.Fatal("due retry missing")
 	}
+	if claims[0].FailureCount != 1 || claims[0].Attempts != 3 {
+		t.Fatalf("reclaim lost failure budget: attempts=%d failures=%d", claims[0].Attempts, claims[0].FailureCount)
+	}
 	must(s.Confirm(ctx, claims[0]))
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&retried))
+	if retried.FailureCount != 1 {
+		t.Fatalf("confirm changed failure count %d", retried.FailureCount)
+	}
 	claims, err = s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 0 {
@@ -245,7 +283,7 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 		t.Fatalf("claimed %d of 6", len(seen))
 	}
 	// A malformed immutable payload stays visible in quarantine.
-	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"state": "pending", "payload": []byte("tampered")}})
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"state": "pending", "next_attempt_at": time.Now().Add(-time.Second), "payload": []byte("tampered")}})
 	must(err)
 	claims, err = s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
@@ -256,6 +294,13 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 	must(err)
 	if n != 1 {
 		t.Fatal("quarantine evidence lost")
+	}
+	var quarantined struct {
+		FailureCount uint64 `bson:"failure_count"`
+	}
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&quarantined))
+	if quarantined.FailureCount != 2 {
+		t.Fatalf("corruption quarantine failure count %d", quarantined.FailureCount)
 	}
 
 }
