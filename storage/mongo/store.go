@@ -36,6 +36,7 @@ func Indexes() []driver.IndexModel {
 	return []driver.IndexModel{
 		{Keys: bson.D{{Key: "state", Value: 1}, {Key: "next_attempt_at", Value: 1}}},
 		{Keys: bson.D{{Key: "state", Value: 1}, {Key: "lease_until", Value: 1}}},
+		{Keys: bson.D{{Key: "next_attempt_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("ix_rm_outbox_active_due").SetPartialFilterExpression(bson.M{"state": bson.M{"$in": bson.A{"pending", "retry_wait", "publishing"}}})},
 	}
 }
 func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([]outbox.Claim, error) {
@@ -49,8 +50,8 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([
 			return claims, err
 		}
 		token := hex.EncodeToString(entropy[:])
-		filter := bson.M{"$or": bson.A{
-			bson.M{"state": bson.M{"$in": bson.A{"pending", "retry_wait"}}, "$expr": bson.M{"$lte": bson.A{"$next_attempt_at", "$$NOW"}}},
+		filter := bson.M{"state": bson.M{"$in": bson.A{"pending", "retry_wait", "publishing"}}, "$expr": bson.M{"$lte": bson.A{"$next_attempt_at", "$$NOW"}}, "$or": bson.A{
+			bson.M{"state": bson.M{"$in": bson.A{"pending", "retry_wait"}}},
 			bson.M{"state": "publishing", "$expr": bson.M{"$lte": bson.A{"$lease_until", "$$NOW"}}},
 		}}
 		// The sort key for publishing records is the lease expiry, not their

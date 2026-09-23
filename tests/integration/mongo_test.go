@@ -163,7 +163,8 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 	if len(claims) != 0 {
 		t.Fatal("live claim stolen")
 	}
-	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"lease_until": time.Now().Add(-time.Minute)}})
+	expiredAt := time.Now().Add(-time.Minute)
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"lease_until": expiredAt, "next_attempt_at": expiredAt}})
 	must(err)
 	if err = s.Confirm(ctx, old); !errors.Is(err, outbox.ErrStaleClaim) {
 		t.Fatal("expired confirm accepted", err)
