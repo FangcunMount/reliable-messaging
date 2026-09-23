@@ -141,6 +141,9 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 		t.Fatalf("claims %d", len(claims))
 	}
 	old := claims[0]
+	if old.FailureCount != 0 {
+		t.Fatalf("initial failure count %d", old.FailureCount)
+	}
 	claims, err = s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 0 {
@@ -157,7 +160,7 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 		t.Fatal("expired claim not recovered")
 	}
 	fresh := claims[0]
-	if fresh.RecordID != old.RecordID || fresh.Token == old.Token || fresh.Version <= old.Version || fresh.Attempts != 2 {
+	if fresh.RecordID != old.RecordID || fresh.Token == old.Token || fresh.Version <= old.Version || fresh.Attempts != 2 || fresh.FailureCount != 0 {
 		t.Fatal("reclaim fencing changed incorrectly")
 	}
 	for _, e := range []error{s.Confirm(ctx, old), s.Retry(ctx, old, time.Second, "unknown"), s.Quarantine(ctx, old, "invalid")} {
@@ -171,6 +174,13 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 		}
 	}
 	must(s.Retry(ctx, fresh, time.Hour, "$literal-error"))
+	var retried struct {
+		FailureCount uint64 `bson:"failure_count"`
+	}
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&retried))
+	if retried.FailureCount != 1 {
+		t.Fatalf("retry failure count %d", retried.FailureCount)
+	}
 	cursor, e := db.Collection("outbox").Aggregate(ctx, bson.A{
 		bson.M{"$match": bson.M{"message_id": "stable"}},
 		bson.M{"$project": bson.M{"remaining_ms": bson.M{"$subtract": bson.A{"$next_attempt_at", "$$NOW"}}, "last_error_code": 1}},
@@ -197,7 +207,14 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 	if len(claims) != 1 {
 		t.Fatal("due retry missing")
 	}
+	if claims[0].FailureCount != 1 || claims[0].Attempts != 3 {
+		t.Fatalf("reclaim lost failure budget: attempts=%d failures=%d", claims[0].Attempts, claims[0].FailureCount)
+	}
 	must(s.Confirm(ctx, claims[0]))
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&retried))
+	if retried.FailureCount != 1 {
+		t.Fatalf("confirm changed failure count %d", retried.FailureCount)
+	}
 	claims, err = s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 0 {
@@ -256,6 +273,13 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 	must(err)
 	if n != 1 {
 		t.Fatal("quarantine evidence lost")
+	}
+	var quarantined struct {
+		FailureCount uint64 `bson:"failure_count"`
+	}
+	must(db.Collection("outbox").FindOne(ctx, bson.M{"message_id": "stable"}).Decode(&quarantined))
+	if quarantined.FailureCount != 2 {
+		t.Fatalf("corruption quarantine failure count %d", quarantined.FailureCount)
 	}
 
 }

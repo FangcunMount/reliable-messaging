@@ -95,6 +95,9 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 		t.Fatalf("claims: %d", len(claims))
 	}
 	old := claims[0]
+	if old.FailureCount != 0 {
+		t.Fatalf("initial failure count %d", old.FailureCount)
+	}
 	again, err := s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(again) != 0 {
@@ -112,7 +115,7 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 		t.Fatal("expired lease not reclaimed")
 	}
 	fresh := claims[0]
-	if fresh.Token == old.Token || fresh.Version <= old.Version || fresh.Attempts != 2 || fresh.Message.Fingerprint() != m.Fingerprint() {
+	if fresh.Token == old.Token || fresh.Version <= old.Version || fresh.Attempts != 2 || fresh.FailureCount != 0 || fresh.Message.Fingerprint() != m.Fingerprint() {
 		t.Fatal("reclaim identity/fencing violated")
 	}
 	for _, err := range []error{s.Confirm(ctx, old), s.Retry(ctx, old, time.Second, "network"), s.Quarantine(ctx, old, "invalid")} {
@@ -126,6 +129,11 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 		}
 	}
 	must(s.Retry(ctx, fresh, time.Hour, "unknown"))
+	var failures uint64
+	must(db.QueryRowContext(ctx, "SELECT failure_count FROM rm_outbox WHERE id=?", fresh.RecordID).Scan(&failures))
+	if failures != 1 {
+		t.Fatalf("retry failure count %d", failures)
+	}
 	var remainingMicros int64
 	must(db.QueryRowContext(ctx, "SELECT TIMESTAMPDIFF(MICROSECOND,UTC_TIMESTAMP(6),next_attempt_at) FROM rm_outbox WHERE id=?", fresh.RecordID).Scan(&remainingMicros))
 	if remainingMicros > time.Hour.Microseconds() || remainingMicros < (time.Hour-10*time.Second).Microseconds() {
@@ -144,7 +152,14 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 	if len(claims) != 1 {
 		t.Fatal("due retry missing")
 	}
+	if claims[0].FailureCount != 1 || claims[0].Attempts != 3 {
+		t.Fatalf("reclaim lost failure budget: attempts=%d failures=%d", claims[0].Attempts, claims[0].FailureCount)
+	}
 	must(s.Confirm(ctx, claims[0]))
+	must(db.QueryRowContext(ctx, "SELECT failure_count FROM rm_outbox WHERE id=?", fresh.RecordID).Scan(&failures))
+	if failures != 1 {
+		t.Fatalf("confirm changed failure count %d", failures)
+	}
 	claims, err = s.ClaimDue(ctx, 10, time.Minute)
 	must(err)
 	if len(claims) != 0 {
@@ -197,6 +212,14 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 		t.Fatal("corruption evidence lost")
 	}
 	must(s.Quarantine(ctx, claims[0], "host_rejected"))
+	must(db.QueryRowContext(ctx, "SELECT failure_count FROM rm_outbox WHERE message_id='corrupt'").Scan(&failures))
+	if failures != 1 {
+		t.Fatalf("corruption quarantine failure count %d", failures)
+	}
+	must(db.QueryRowContext(ctx, "SELECT failure_count FROM rm_outbox WHERE message_id='valid-after-corrupt'").Scan(&failures))
+	if failures != 1 {
+		t.Fatalf("host quarantine failure count %d", failures)
+	}
 	if _, err = store.Bind(nil); err == nil {
 		t.Fatal("missing transaction accepted")
 	}
