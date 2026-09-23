@@ -53,7 +53,10 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([
 			bson.M{"state": bson.M{"$in": bson.A{"pending", "retry_wait"}}, "$expr": bson.M{"$lte": bson.A{"$next_attempt_at", "$$NOW"}}},
 			bson.M{"state": "publishing", "$expr": bson.M{"$lte": bson.A{"$lease_until", "$$NOW"}}},
 		}}
-		update := driver.Pipeline{bson.D{{Key: "$set", Value: bson.M{"state": "publishing", "claim_token": token, "lease_until": bson.M{"$dateAdd": bson.M{"startDate": "$$NOW", "unit": "millisecond", "amount": lease.Milliseconds()}}, "version": bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{"$version", 0}}, 1}}, "attempt_count": bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{"$attempt_count", 0}}, 1}}, "updated_at": "$$NOW"}}}}
+		// The sort key for publishing records is the lease expiry, not their
+		// original append time. Both fields use the same server clock instant.
+		leaseDue := bson.M{"$dateAdd": bson.M{"startDate": "$$NOW", "unit": "millisecond", "amount": lease.Milliseconds()}}
+		update := driver.Pipeline{bson.D{{Key: "$set", Value: bson.M{"state": "publishing", "claim_token": token, "lease_until": leaseDue, "next_attempt_at": leaseDue, "version": bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{"$version", 0}}, 1}}, "attempt_count": bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{"$attempt_count", 0}}, 1}}, "updated_at": "$$NOW"}}}}
 		var row struct {
 			ID            bson.Raw  `bson:"_id"`
 			Producer      string    `bson:"producer"`

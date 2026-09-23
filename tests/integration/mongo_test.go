@@ -282,7 +282,7 @@ func TestMongoOriginalTransactionAndReentry(t *testing.T) {
 		t.Fatalf("claimed %d of 6", len(seen))
 	}
 	// A malformed immutable payload stays visible in quarantine.
-	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"state": "pending", "payload": []byte("tampered")}})
+	_, err = db.Collection("outbox").UpdateOne(ctx, bson.M{"message_id": "stable"}, bson.M{"$set": bson.M{"state": "pending", "next_attempt_at": time.Now().Add(-time.Second), "payload": []byte("tampered")}})
 	must(err)
 	claims, err = s.ClaimDue(ctx, 10, time.Minute)
 	must(err)

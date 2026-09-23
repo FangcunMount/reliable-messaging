@@ -137,7 +137,10 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, lease time.Duration) ([
 		c.claim.Token = hex.EncodeToString(token[:])
 		c.claim.LeaseUntil = now.Add(lease).Truncate(time.Microsecond)
 		c.claim.Message = m
-		if _, err := tx.ExecContext(ctx, `UPDATE rm_outbox SET state='publishing',claim_token=?,lease_until=?,version=version+1,attempt_count=attempt_count+1,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND version=?`, c.claim.Token, c.claim.LeaseUntil.Format(databaseTimeLayout), c.claim.RecordID, c.claim.Version); err != nil {
+		// During publishing, the next eligible attempt is the lease expiry.
+		// Keep the sort key aligned with that due time across states.
+		leaseUntil := c.claim.LeaseUntil.Format(databaseTimeLayout)
+		if _, err := tx.ExecContext(ctx, `UPDATE rm_outbox SET state='publishing',claim_token=?,lease_until=?,next_attempt_at=?,version=version+1,attempt_count=attempt_count+1,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND version=?`, c.claim.Token, leaseUntil, leaseUntil, c.claim.RecordID, c.claim.Version); err != nil {
 			return nil, err
 		}
 		c.claim.Version++
