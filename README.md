@@ -26,9 +26,9 @@ make integration  # disposable local Docker resources
 
 ## 维护与分发
 
-项目发起人最终审核 SDK、IAM 接入、qs-server 接入和运维。仓库保持私有，通过有权访问的 GitHub 账号分发 Go module；调用方配置 `GOPRIVATE=github.com/FangcunMount/*`，凭据由本机或 CI 管理，不写入仓库。
+项目发起人最终审核 SDK、IAM 接入、qs-server 接入和运维。2026-09-23 仓库已设为 Public，Go module 可按固定版本公开下载；读取本模块不再需要 GitHub App、私库凭据或专门的 `GOPRIVATE` 配置。
 
-首期内部私有使用，不添加开放源码授权；对外分发与许可证另行决定。依赖仍遵守各自许可证。
+仓库可见性变更不替代版本审核。开放源码许可证仍待项目发起人决定，本次不新增许可证；依赖仍遵守各自许可证。
 
 真实隔离环境入口见 [integration](tests/integration/README.md)，可执行接入参考见 [examples](examples/README.md)。
 
