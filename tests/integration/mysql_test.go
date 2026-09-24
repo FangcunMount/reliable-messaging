@@ -314,10 +314,27 @@ func TestMySQLConcurrentSameIdentityRemainsIdempotent(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	select {
-	case err := <-result:
-		t.Fatalf("concurrent duplicate completed before first commit: %v", err)
-	case <-time.After(50 * time.Millisecond):
+	waitDeadline := time.Now().Add(2 * time.Second)
+	for {
+		select {
+		case err := <-result:
+			t.Fatalf("concurrent duplicate completed before first commit: %v", err)
+		default:
+		}
+		var waiting int
+		err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM performance_schema.data_lock_waits waits
+ JOIN performance_schema.data_locks locks ON locks.ENGINE_LOCK_ID=waits.REQUESTING_ENGINE_LOCK_ID
+ WHERE locks.OBJECT_NAME='rm_outbox'`).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(waitDeadline) {
+			t.Fatal("second insert did not wait for the uncommitted identity")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if err := first.Commit(); err != nil {
 		t.Fatal(err)
