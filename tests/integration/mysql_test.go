@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -78,18 +79,27 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 		t.Fatalf("outbox count %d", n)
 	}
 	in.ID = "committed"
+	var originalPayload []byte
+	var originalDue time.Time
+	must(db.QueryRowContext(ctx, "SELECT payload,next_attempt_at FROM rm_outbox WHERE message_id='committed'").Scan(&originalPayload, &originalDue))
 	tx, err := db.BeginTx(ctx, nil)
 	must(err)
 	a, err := store.Bind(tx)
 	must(err)
 	m, err := message.New(in)
 	must(err)
-	must(a.Append(ctx, m, time.Now()))
+	must(a.Append(ctx, m, time.Now().Add(time.Hour)))
 	in.Payload = []byte(`{"version":2}`)
 	changed, err := message.New(in)
 	must(err)
 	if err = a.Append(ctx, changed, time.Now()); !errors.Is(err, outbox.ErrConflict) {
 		t.Fatalf("conflict: %v", err)
+	}
+	var retainedPayload []byte
+	var retainedDue time.Time
+	must(tx.QueryRowContext(ctx, "SELECT payload,next_attempt_at FROM rm_outbox WHERE message_id='committed'").Scan(&retainedPayload, &retainedDue))
+	if !bytes.Equal(retainedPayload, originalPayload) || !retainedDue.Equal(originalDue) {
+		t.Fatal("duplicate append changed immutable payload or due time")
 	}
 	must(tx.Rollback())
 	s, err := store.New(db)
@@ -239,6 +249,108 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 	}
 	if _, err = store.Bind(nil); err == nil {
 		t.Fatal("missing transaction accepted")
+	}
+}
+
+func TestMySQLConcurrentSameIdentityRemainsIdempotent(t *testing.T) {
+	dsn := os.Getenv("RM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Fatal("isolated RM_TEST_MYSQL_DSN required")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctx, store.Schema); err != nil {
+		t.Fatal(err)
+	}
+	in := message.Input{Producer: "concurrent-append", ID: fmt.Sprintf("%d", time.Now().UnixNano()),
+		Destination: "events", EventType: "created", SchemaVersion: "1", Scope: "global",
+		ContentType: "application/json", OccurredAt: "2026-09-22T00:00:00Z", Payload: []byte(`{"version":1}`)}
+	m, err := message.New(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback()
+	firstAppender, err := store.Bind(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := firstAppender.Append(ctx, m, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		second, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			result <- err
+			return
+		}
+		defer second.Rollback()
+		secondAppender, err := store.Bind(second)
+		if err != nil {
+			result <- err
+			return
+		}
+		close(started)
+		if err := secondAppender.Append(ctx, m, time.Now().Add(time.Hour)); err != nil {
+			result <- err
+			return
+		}
+		result <- second.Commit()
+	}()
+	select {
+	case <-started:
+	case err := <-result:
+		t.Fatal(err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	waitDeadline := time.Now().Add(2 * time.Second)
+	for {
+		select {
+		case err := <-result:
+			t.Fatalf("concurrent duplicate completed before first commit: %v", err)
+		default:
+		}
+		var waiting int
+		err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM performance_schema.data_lock_waits waits
+ JOIN performance_schema.data_locks locks ON locks.ENGINE_LOCK_ID=waits.REQUESTING_ENGINE_LOCK_ID
+ WHERE locks.OBJECT_NAME='rm_outbox'`).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(waitDeadline) {
+			t.Fatal("second insert did not wait for the uncommitted identity")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := first.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM rm_outbox WHERE producer=? AND message_id=? AND destination=?",
+		in.Producer, in.ID, in.Destination).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("concurrent append count=%d: %v", count, err)
 	}
 }
 

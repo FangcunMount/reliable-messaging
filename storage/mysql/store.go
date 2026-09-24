@@ -16,6 +16,7 @@ import (
 
 	"github.com/FangcunMount/reliable-messaging/message"
 	"github.com/FangcunMount/reliable-messaging/outbox"
+	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
 // Schema is applied explicitly by the host. Constructors never execute DDL.
@@ -50,10 +51,16 @@ func (a *Appender) Append(ctx context.Context, m message.Message, due time.Time)
 	hash := m.Fingerprint()
 	_, err := a.tx.ExecContext(ctx, `INSERT INTO rm_outbox
  (producer,message_id,destination,event_type,schema_version,scope,content_type,occurred_at,payload,fingerprint,next_attempt_at)
- VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id=id`, in.Producer, in.ID, in.Destination, in.EventType, in.SchemaVersion, in.Scope, in.ContentType, in.OccurredAt, in.Payload, hash[:], due.UTC().Format(databaseTimeLayout))
-	if err != nil {
+	 VALUES (?,?,?,?,?,?,?,?,?,?,?)`, in.Producer, in.ID, in.Destination, in.EventType, in.SchemaVersion, in.Scope, in.ContentType, in.OccurredAt, in.Payload, hash[:], due.UTC().Format(databaseTimeLayout))
+	if err == nil {
+		return nil
+	}
+	var mysqlErr *mysqldriver.MySQLError
+	if !errors.As(err, &mysqlErr) || mysqlErr.Number != 1062 {
 		return err
 	}
+	// A duplicate identity is idempotent only when the immutable content is
+	// identical. New identities avoid this extra read on the common path.
 	var existing []byte
 	if err := a.tx.QueryRowContext(ctx, `SELECT fingerprint FROM rm_outbox WHERE producer=? AND message_id=? AND destination=? FOR UPDATE`, in.Producer, in.ID, in.Destination).Scan(&existing); err != nil {
 		return err
