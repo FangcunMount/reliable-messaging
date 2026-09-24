@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -78,18 +79,27 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 		t.Fatalf("outbox count %d", n)
 	}
 	in.ID = "committed"
+	var originalPayload []byte
+	var originalDue time.Time
+	must(db.QueryRowContext(ctx, "SELECT payload,next_attempt_at FROM rm_outbox WHERE message_id='committed'").Scan(&originalPayload, &originalDue))
 	tx, err := db.BeginTx(ctx, nil)
 	must(err)
 	a, err := store.Bind(tx)
 	must(err)
 	m, err := message.New(in)
 	must(err)
-	must(a.Append(ctx, m, time.Now()))
+	must(a.Append(ctx, m, time.Now().Add(time.Hour)))
 	in.Payload = []byte(`{"version":2}`)
 	changed, err := message.New(in)
 	must(err)
 	if err = a.Append(ctx, changed, time.Now()); !errors.Is(err, outbox.ErrConflict) {
 		t.Fatalf("conflict: %v", err)
+	}
+	var retainedPayload []byte
+	var retainedDue time.Time
+	must(tx.QueryRowContext(ctx, "SELECT payload,next_attempt_at FROM rm_outbox WHERE message_id='committed'").Scan(&retainedPayload, &retainedDue))
+	if !bytes.Equal(retainedPayload, originalPayload) || !retainedDue.Equal(originalDue) {
+		t.Fatal("duplicate append changed immutable payload or due time")
 	}
 	must(tx.Rollback())
 	s, err := store.New(db)
