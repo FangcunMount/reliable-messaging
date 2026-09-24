@@ -252,6 +252,91 @@ func TestMySQLTransactionAndFencing(t *testing.T) {
 	}
 }
 
+func TestMySQLConcurrentSameIdentityRemainsIdempotent(t *testing.T) {
+	dsn := os.Getenv("RM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Fatal("isolated RM_TEST_MYSQL_DSN required")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctx, store.Schema); err != nil {
+		t.Fatal(err)
+	}
+	in := message.Input{Producer: "concurrent-append", ID: fmt.Sprintf("%d", time.Now().UnixNano()),
+		Destination: "events", EventType: "created", SchemaVersion: "1", Scope: "global",
+		ContentType: "application/json", OccurredAt: "2026-09-22T00:00:00Z", Payload: []byte(`{"version":1}`)}
+	m, err := message.New(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback()
+	firstAppender, err := store.Bind(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := firstAppender.Append(ctx, m, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		second, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			result <- err
+			return
+		}
+		defer second.Rollback()
+		secondAppender, err := store.Bind(second)
+		if err != nil {
+			result <- err
+			return
+		}
+		close(started)
+		if err := secondAppender.Append(ctx, m, time.Now().Add(time.Hour)); err != nil {
+			result <- err
+			return
+		}
+		result <- second.Commit()
+	}()
+	select {
+	case <-started:
+	case err := <-result:
+		t.Fatal(err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case err := <-result:
+		t.Fatalf("concurrent duplicate completed before first commit: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := first.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM rm_outbox WHERE producer=? AND message_id=? AND destination=?",
+		in.Producer, in.ID, in.Destination).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("concurrent append count=%d: %v", count, err)
+	}
+}
+
 // This injects an actual MySQL write rejection. The publisher is an in-process
 // transport double; broker confirmation-loss/crash tests remain a separate gate.
 func TestRelayRecoversRealDatabaseWriteFailure(t *testing.T) {
