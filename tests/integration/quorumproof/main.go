@@ -356,7 +356,12 @@ func receiveNSQAfterCrash(ctx context.Context) error {
 }
 
 func run(phase string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	timeout := 60 * time.Second
+	if phase == "ack-recover" {
+		// NSQ may wait for its in-flight timeout after an abrupt consumer exit.
+		timeout = 90 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	switch phase {
 	case "seed":

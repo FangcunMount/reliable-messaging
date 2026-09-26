@@ -57,5 +57,9 @@ nsq_id=$("${compose[@]}" ps -a -q nsqd)
 "${compose[@]}" exec -T rabbitmq2 /tmp/quorumproof ack-seed
 "${compose[@]}" exec -d rabbitmq2 sh -c '/tmp/quorumproof ack-take >/tmp/quorumproof-ack-take.log 2>&1'
 "${compose[@]}" exec -T rabbitmq2 /tmp/quorumproof ack-inflight
+echo 'PASS same original delivery in-flight without ACK/FIN on both brokers'
 "${compose[@]}" exec -T rabbitmq2 sh -ec 'test -s /tmp/quorumproof-ack-take.pid; kill -KILL "$(cat /tmp/quorumproof-ack-take.pid)"'
+redelivery_started=$(date +%s)
+echo 'Consumer process SIGKILL completed; waiting for broker redelivery'
 "${compose[@]}" exec -T rabbitmq2 /tmp/quorumproof ack-recover
+echo "Consumer crash to both ACK/FIN drained: $(($(date +%s) - redelivery_started)) seconds"
