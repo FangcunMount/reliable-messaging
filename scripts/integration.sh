@@ -63,8 +63,8 @@ build_released_handoff() {
   mkdir -p "$source_dir/versionhandoff"
   git -C "$repo" archive "$tag" | tar -xf - -C "$source_dir"
   cp "$repo/tests/integration/versionhandoff/main.go" "$source_dir/versionhandoff/main.go"
-  (cd "$source_dir" && GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -o "$build_dir/handoff-$label" ./versionhandoff)
-  "${compose[@]}" cp "$build_dir/handoff-$label" "mysql:/tmp/handoff-$label"
+  (cd "$source_dir" && GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -o "$build_dir/handoff-$label.bin" ./versionhandoff)
+  "${compose[@]}" cp "$build_dir/handoff-$label.bin" "mysql:/tmp/handoff-$label"
 }
 
 # Build the same host scenario against two actual release tags. A current
