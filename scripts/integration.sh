@@ -87,6 +87,21 @@ handoff_dsn='root@tcp(127.0.0.1:3306)/rm_sdk_version_handoff?parseTime=true&loc=
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-lease-recover
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-lease-seed
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-lease-recover
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new parallel-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_PARTICIPANT=old mysql /tmp/handoff-old parallel-claim > "$build_dir/mysql-parallel-old.log" 2>&1 &
+mysql_old_pid=$!
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_PARTICIPANT=new mysql /tmp/handoff-new parallel-claim > "$build_dir/mysql-parallel-new.log" 2>&1 &
+mysql_new_pid=$!
+mysql_old_status=0
+mysql_new_status=0
+wait "$mysql_old_pid" || mysql_old_status=$?
+wait "$mysql_new_pid" || mysql_new_status=$?
+if ((mysql_old_status != 0 || mysql_new_status != 0)); then
+  cat "$build_dir/mysql-parallel-old.log" "$build_dir/mysql-parallel-new.log" >&2
+  exit 1
+fi
+cat "$build_dir/mysql-parallel-old.log" "$build_dir/mysql-parallel-new.log"
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new parallel-verify
 handoff_mongo_uri='mongodb://mongo:27017/?replicaSet=rm-test'
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-seed
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-index
@@ -101,6 +116,21 @@ handoff_mongo_uri='mongodb://mongo:27017/?replicaSet=rm-test'
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-lease-recover
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-lease-seed
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-lease-recover
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-parallel-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_PARTICIPANT=old mysql /tmp/handoff-old mongo-parallel-claim > "$build_dir/mongo-parallel-old.log" 2>&1 &
+mongo_old_pid=$!
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_PARTICIPANT=new mysql /tmp/handoff-new mongo-parallel-claim > "$build_dir/mongo-parallel-new.log" 2>&1 &
+mongo_new_pid=$!
+mongo_old_status=0
+mongo_new_status=0
+wait "$mongo_old_pid" || mongo_old_status=$?
+wait "$mongo_new_pid" || mongo_new_status=$?
+if ((mongo_old_status != 0 || mongo_new_status != 0)); then
+  cat "$build_dir/mongo-parallel-old.log" "$build_dir/mongo-parallel-new.log" >&2
+  exit 1
+fi
+cat "$build_dir/mongo-parallel-old.log" "$build_dir/mongo-parallel-new.log"
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-parallel-verify
 
 
 

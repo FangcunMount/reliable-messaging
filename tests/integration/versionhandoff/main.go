@@ -248,6 +248,12 @@ func run(ctx context.Context, db *sql.DB, phase string) error {
 			return err
 		}
 		fmt.Println("PASS MySQL v0.1.0 respected and recovered v0.2.1 lease; stale claim fenced")
+	case "parallel-seed":
+		return mysqlParallelSeed(ctx, db)
+	case "parallel-claim":
+		return mysqlParallelClaim(ctx, db)
+	case "parallel-verify":
+		return mysqlParallelVerify(ctx, db)
 	default:
 		return fmt.Errorf("unknown phase %q", phase)
 	}

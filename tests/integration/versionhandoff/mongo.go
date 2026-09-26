@@ -261,6 +261,12 @@ func runMongo(ctx context.Context, client *driver.Client, phase string) error {
 			return err
 		}
 		fmt.Println("PASS Mongo v0.1.0 respected and recovered v0.2.1 lease; stale claim fenced")
+	case "mongo-parallel-seed":
+		return mongoParallelSeed(ctx, client)
+	case "mongo-parallel-claim":
+		return mongoParallelClaim(ctx, client)
+	case "mongo-parallel-verify":
+		return mongoParallelVerify(ctx, client)
 	default:
 		return fmt.Errorf("unknown Mongo phase %q", phase)
 	}
