@@ -49,7 +49,7 @@ build_dir=$(mktemp -d "${TMPDIR:-/tmp}/$project-build.XXXXXX")
 (cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/mysql-integration" ./tests/integration)
 "${compose[@]}" cp "$build_dir/mysql-integration" mysql:/tmp/mysql-integration
 "${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_sdk_test'
-"${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' -e RM_TEST_MONGO_URI='mongodb://mongo:27017/?replicaSet=rm-test' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' -e RM_TEST_RABBITMQ_URL='amqp://rmtest:rmtest@rabbitmq:5672/' mysql /tmp/mysql-integration -test.v
+"${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' -e RM_TEST_MONGO_URI='mongodb://mongo:27017/?replicaSet=rm-test' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' -e RM_TEST_RABBITMQ_URL='amqp://rmtest:rmtest@rabbitmq:5672/' -e RM_TEST_RABBITMQ_HTTP='http://rabbitmq:15672' mysql /tmp/mysql-integration -test.v
 
 
 

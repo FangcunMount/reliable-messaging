@@ -14,6 +14,19 @@ import (
 
 type sendFunc func(context.Context, Route, message.Input) transport.Outcome
 
+type verifyFunc func(context.Context, Route) transport.Outcome
+
+func (f verifyFunc) Verify(ctx context.Context, route Route) transport.Outcome { return f(ctx, route) }
+
+func verified() verifyFunc {
+	return func(context.Context, Route) transport.Outcome { return transport.Confirmed }
+}
+
+func fixtureRoute() Route {
+	return Route{Exchange: "rm.assessment", ExchangeKind: "direct", RoutingKey: "submitted",
+		RequiredQueues: []RequiredQueue{{Name: "worker", BindingKey: "submitted", QueueType: "classic"}}}
+}
+
 func (f sendFunc) Send(ctx context.Context, route Route, in message.Input) transport.Outcome {
 	return f(ctx, route, in)
 }
@@ -33,7 +46,7 @@ func fixture(t *testing.T) message.Message {
 
 func TestRouteCopyIdentityAndClassification(t *testing.T) {
 	m := fixture(t)
-	routes := map[string]Route{"assessment": {Exchange: "rm.assessment", RoutingKey: "submitted"}}
+	routes := map[string]Route{"assessment": fixtureRoute()}
 	p, err := newPublisher(sendFunc(func(_ context.Context, route Route, in message.Input) transport.Outcome {
 		if route.Exchange != "rm.assessment" || route.RoutingKey != "submitted" || in.ID != m.Input().ID ||
 			string(in.Payload) != string(m.Input().Payload) {
@@ -41,7 +54,7 @@ func TestRouteCopyIdentityAndClassification(t *testing.T) {
 		}
 		in.Payload[0] = '!'
 		return transport.Confirmed
-	}), routes)
+	}), verified(), routes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +85,7 @@ func TestTimeoutRetainsChannelSlotUntilDriverFinishes(t *testing.T) {
 		entered <- struct{}{}
 		<-release
 		return transport.Confirmed
-	}), map[string]Route{"assessment": {Exchange: "rm.assessment"}})
+	}), verified(), map[string]Route{"assessment": fixtureRoute()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,5 +139,46 @@ func TestUncertainDriverErrorPoisonsSession(t *testing.T) {
 	}
 	if ch.calls.Load() != 1 {
 		t.Fatal("poisoned channel was reused after uncertain publish")
+	}
+}
+
+func TestMissingRequiredBindingNeverCallsDriver(t *testing.T) {
+	var calls atomic.Int32
+	p, err := newPublisher(sendFunc(func(context.Context, Route, message.Input) transport.Outcome {
+		calls.Add(1)
+		return transport.Confirmed
+	}), verifyFunc(func(context.Context, Route) transport.Outcome {
+		return transport.Rejected
+	}), map[string]Route{"assessment": fixtureRoute()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Publish(context.Background(), fixture(t)).Outcome; got != transport.Rejected || calls.Load() != 0 {
+		t.Fatalf("missing binding: outcome=%v driver calls=%d", got, calls.Load())
+	}
+	if err := p.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRouteRequirementsAreCopied(t *testing.T) {
+	route := fixtureRoute()
+	p, err := newPublisher(sendFunc(func(context.Context, Route, message.Input) transport.Outcome {
+		return transport.Confirmed
+	}), verifyFunc(func(_ context.Context, got Route) transport.Outcome {
+		if got.RequiredQueues[0].Name != "worker" {
+			t.Error("caller mutated required binding")
+		}
+		return transport.Confirmed
+	}), map[string]Route{"assessment": route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route.RequiredQueues[0].Name = "other"
+	if got := p.Publish(context.Background(), fixture(t)).Outcome; got != transport.Confirmed {
+		t.Fatalf("publish = %v", got)
+	}
+	if err := p.Drain(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
