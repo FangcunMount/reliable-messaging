@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/FangcunMount/reliable-messaging/message"
+	"github.com/FangcunMount/reliable-messaging/outbox"
 	store "github.com/FangcunMount/reliable-messaging/storage/mysql"
 	mysqlDriver "github.com/go-sql-driver/mysql"
 )
@@ -95,6 +96,53 @@ func drain(ctx context.Context, db *sql.DB, expected ...string) error {
 	return nil
 }
 
+func mysqlRetryState(ctx context.Context, db *sql.DB, code string, wantAttempts, wantFailures int, quarantine bool) error {
+	s, err := store.New(db)
+	if err != nil {
+		return err
+	}
+	var claim outbox.Claim
+	claimed := false
+	for attempt := 0; attempt < 50; attempt++ {
+		claims, err := s.ClaimDue(ctx, 1, time.Minute)
+		if err != nil {
+			return err
+		}
+		if len(claims) == 1 {
+			claim, claimed = claims[0], true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !claimed {
+		return errors.New("original retry identity was not due")
+	}
+	if claim.Message.Input().ID != "state-retry" {
+		return fmt.Errorf("unexpected retry identity %q", claim.Message.Input().ID)
+	}
+	if quarantine {
+		err = s.Quarantine(ctx, claim, code)
+	} else {
+		err = s.Retry(ctx, claim, 10*time.Millisecond, code)
+	}
+	if err != nil {
+		return err
+	}
+	var state, lastCode string
+	var attempts, failures int
+	if err := db.QueryRowContext(ctx, "SELECT state,attempt_count,failure_count,last_error_code FROM rm_outbox WHERE message_id=?", "state-retry").Scan(&state, &attempts, &failures, &lastCode); err != nil {
+		return err
+	}
+	wantState := "retry_wait"
+	if quarantine {
+		wantState = "quarantined"
+	}
+	if state != wantState || attempts != wantAttempts || failures != wantFailures || lastCode != code {
+		return fmt.Errorf("mysql retry state=%s attempts=%d failures=%d code=%s, want %s/%d/%d/%s", state, attempts, failures, lastCode, wantState, wantAttempts, wantFailures, code)
+	}
+	return nil
+}
+
 func run(ctx context.Context, db *sql.DB, phase string) error {
 	switch phase {
 	case "old-seed":
@@ -156,6 +204,29 @@ func run(ctx context.Context, db *sql.DB, phase string) error {
 			return fmt.Errorf("final facts=%d outbox=%d published=%d distinct=%d", facts, total, published, distinct)
 		}
 		fmt.Println("PASS actual v0.1.0 drained ordinary v0.2.1 pending; four host facts and original identities remain")
+	case "old-retry-seed":
+		if err := appendFact(ctx, db, "state-retry"); err != nil {
+			return err
+		}
+		if err := mysqlRetryState(ctx, db, "old_failure", 1, 0, false); err != nil {
+			return err
+		}
+		fmt.Println("PASS MySQL v0.1.0 retry retained original identity and did not write future failure_count")
+	case "new-retry":
+		if err := mysqlRetryState(ctx, db, "new_failure", 2, 1, false); err != nil {
+			return err
+		}
+		fmt.Println("PASS MySQL v0.2.1 retry incremented failure_count on old intent")
+	case "old-retry-downgrade":
+		if err := mysqlRetryState(ctx, db, "old_after_downgrade", 3, 1, false); err != nil {
+			return err
+		}
+		fmt.Println("OBSERVED MySQL v0.1.0 retry after downgrade did not advance failure_count")
+	case "new-retry-quarantine":
+		if err := mysqlRetryState(ctx, db, "quarantine_after_downgrade", 4, 2, true); err != nil {
+			return err
+		}
+		fmt.Println("PASS MySQL v0.2.1 quarantined original identity; diagnostic failure_count undercounts old retries")
 	default:
 		return fmt.Errorf("unknown phase %q", phase)
 	}

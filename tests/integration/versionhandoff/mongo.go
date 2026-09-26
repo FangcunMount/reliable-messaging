@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/FangcunMount/reliable-messaging/message"
+	"github.com/FangcunMount/reliable-messaging/outbox"
 	adapter "github.com/FangcunMount/reliable-messaging/storage/mongo"
 	"go.mongodb.org/mongo-driver/bson"
 	driver "go.mongodb.org/mongo-driver/mongo"
@@ -97,6 +98,58 @@ func mongoDrain(ctx context.Context, client *driver.Client, expected ...string) 
 	return nil
 }
 
+func mongoRetryState(ctx context.Context, client *driver.Client, code string, wantAttempts, wantFailures int, quarantine bool) error {
+	collection := client.Database(database).Collection("rm_outbox")
+	s, err := adapter.New(collection)
+	if err != nil {
+		return err
+	}
+	var claim outbox.Claim
+	claimed := false
+	for attempt := 0; attempt < 50; attempt++ {
+		claims, err := s.ClaimDue(ctx, 1, time.Minute)
+		if err != nil {
+			return err
+		}
+		if len(claims) == 1 {
+			claim, claimed = claims[0], true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !claimed {
+		return errors.New("original mongo retry identity was not due")
+	}
+	if claim.Message.Input().ID != "state-retry" {
+		return fmt.Errorf("unexpected mongo retry identity %q", claim.Message.Input().ID)
+	}
+	if quarantine {
+		err = s.Quarantine(ctx, claim, code)
+	} else {
+		err = s.Retry(ctx, claim, 10*time.Millisecond, code)
+	}
+	if err != nil {
+		return err
+	}
+	var row struct {
+		State        string `bson:"state"`
+		Attempts     int    `bson:"attempt_count"`
+		FailureCount int    `bson:"failure_count"`
+		LastCode     string `bson:"last_error_code"`
+	}
+	if err := collection.FindOne(ctx, bson.M{"message_id": "state-retry"}).Decode(&row); err != nil {
+		return err
+	}
+	wantState := "retry_wait"
+	if quarantine {
+		wantState = "quarantined"
+	}
+	if row.State != wantState || row.Attempts != wantAttempts || row.FailureCount != wantFailures || row.LastCode != code {
+		return fmt.Errorf("mongo retry state=%s attempts=%d failures=%d code=%s, want %s/%d/%d/%s", row.State, row.Attempts, row.FailureCount, row.LastCode, wantState, wantAttempts, wantFailures, code)
+	}
+	return nil
+}
+
 func runMongo(ctx context.Context, client *driver.Client, phase string) error {
 	db := client.Database(database)
 	outbox := db.Collection("rm_outbox")
@@ -164,6 +217,29 @@ func runMongo(ctx context.Context, client *driver.Client, phase string) error {
 		}
 		fmt.Println("PASS actual Mongo v0.1.0 drained ordinary v0.2.1 pending; four host facts and original identities remain")
 		fmt.Println("OBSERVED three v0.1.0 documents still lack created_at; host status reader needs separate compatibility handling")
+	case "mongo-old-retry-seed":
+		if err := mongoAppendFact(ctx, client, "state-retry"); err != nil {
+			return err
+		}
+		if err := mongoRetryState(ctx, client, "old_failure", 1, 0, false); err != nil {
+			return err
+		}
+		fmt.Println("PASS Mongo v0.1.0 retry retained original identity and did not write future failure_count")
+	case "mongo-new-retry":
+		if err := mongoRetryState(ctx, client, "new_failure", 2, 1, false); err != nil {
+			return err
+		}
+		fmt.Println("PASS Mongo v0.2.1 retry incremented failure_count on old intent")
+	case "mongo-old-retry-downgrade":
+		if err := mongoRetryState(ctx, client, "old_after_downgrade", 3, 1, false); err != nil {
+			return err
+		}
+		fmt.Println("OBSERVED Mongo v0.1.0 retry after downgrade did not advance failure_count")
+	case "mongo-new-retry-quarantine":
+		if err := mongoRetryState(ctx, client, "quarantine_after_downgrade", 4, 2, true); err != nil {
+			return err
+		}
+		fmt.Println("PASS Mongo v0.2.1 quarantined original identity; diagnostic failure_count undercounts old retries")
 	default:
 		return fmt.Errorf("unknown Mongo phase %q", phase)
 	}

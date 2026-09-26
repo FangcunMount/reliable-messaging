@@ -79,12 +79,20 @@ handoff_dsn='root@tcp(127.0.0.1:3306)/rm_sdk_version_handoff?parseTime=true&loc=
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-after-ddl
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-drain
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-drain
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-retry-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-retry
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-retry-downgrade
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-retry-quarantine
 handoff_mongo_uri='mongodb://mongo:27017/?replicaSet=rm-test'
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-seed
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-index
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-after-index
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-drain
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-drain
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-retry-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-retry
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-retry-downgrade
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-retry-quarantine
 
 
 
