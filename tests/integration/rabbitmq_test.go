@@ -21,6 +21,23 @@ func (topologyAlreadyChecked) Verify(context.Context, adapter.Route) transport.O
 	return transport.Confirmed
 }
 
+// topologyCutoverVerifier makes the gap between a successful management read
+// and the AMQP publish deterministic. It characterizes the current candidate's
+// limit; it is not a verifier a host should use.
+type topologyCutoverVerifier struct {
+	base    adapter.TopologyVerifier
+	cutover func() error
+	result  chan<- error
+}
+
+func (v topologyCutoverVerifier) Verify(ctx context.Context, route adapter.Route) transport.Outcome {
+	outcome := v.base.Verify(ctx, route)
+	if outcome == transport.Confirmed {
+		v.result <- v.cutover()
+	}
+	return outcome
+}
+
 func integrationRoute(exchange, key string) adapter.Route {
 	return adapter.Route{Exchange: exchange, ExchangeKind: "direct", RoutingKey: key,
 		RequiredQueues: []adapter.RequiredQueue{{Name: "rm.b0.confirm.integration.worker", BindingKey: key, QueueType: "classic"}}}
@@ -283,6 +300,107 @@ func TestRabbitMQRequiredConsumerBindings(t *testing.T) {
 	waitTopology(t, ctx, verifier, route, transport.Confirmed)
 	if got := p.Publish(ctx, m).Outcome; got != transport.Confirmed {
 		t.Fatalf("restored two-group publish = %v, want Confirmed", got)
+	}
+	if err := p.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRabbitMQBindingRemovedAfterTopologyCheck(t *testing.T) {
+	address, management := os.Getenv("RM_TEST_RABBITMQ_URL"), os.Getenv("RM_TEST_RABBITMQ_HTTP")
+	if address == "" || management == "" {
+		t.Fatal("isolated RabbitMQ AMQP and management addresses required")
+	}
+	conn, err := amqp.Dial(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	setup, err := conn.Channel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer setup.Close()
+	const exchange = "rm.b0.topology-race.integration"
+	const workerQueue = "rm.b0.topology-race.integration.worker"
+	const hotRankQueue = "rm.b0.topology-race.integration.hot-rank"
+	if err := setup.ExchangeDeclare(exchange, "direct", true, false, false, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, queue := range []string{workerQueue, hotRankQueue} {
+			if _, err := setup.QueueDelete(queue, false, false, false); err != nil {
+				t.Error(err)
+			}
+		}
+		if err := setup.ExchangeDelete(exchange, false, false); err != nil {
+			t.Error(err)
+		}
+	}()
+	for _, queue := range []string{workerQueue, hotRankQueue} {
+		if _, err := setup.QueueDeclare(queue, true, false, false, false, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := setup.QueueBind(queue, "submitted", exchange, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verifier, err := adapter.NewManagementVerifier(management, "/", "rmtest", "rmtest", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := adapter.Route{Exchange: exchange, ExchangeKind: "direct", RoutingKey: "submitted",
+		RequiredQueues: []adapter.RequiredQueue{
+			{Name: workerQueue, BindingKey: "submitted", QueueType: "classic"},
+			{Name: hotRankQueue, BindingKey: "submitted", QueueType: "classic"},
+		}}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	waitTopology(t, ctx, verifier, route, transport.Confirmed)
+	cutover := make(chan error, 1)
+	ch, err := conn.Channel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ch.Close()
+	if err := ch.Confirm(false); err != nil {
+		t.Fatal(err)
+	}
+	p, err := adapter.New(ch, topologyCutoverVerifier{
+		base: verifier, result: cutover,
+		cutover: func() error { return setup.QueueUnbind(hotRankQueue, "submitted", exchange, nil) },
+	}, map[string]adapter.Route{"assessment": route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := message.New(message.Input{
+		Producer: "integration", ID: "topology-cutover-b0", Destination: "assessment",
+		EventType: "answersheet.submitted", SchemaVersion: "1", Scope: "global",
+		ContentType: "application/json", OccurredAt: "2026-09-27T00:00:00+08:00",
+		Payload: []byte(`{"id":"topology-cutover-b0"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The management read succeeds, then the second binding is removed before
+	// AMQP sends. mandatory still sees Worker and the broker confirms, while
+	// hot-rank receives nothing. This is a counterexample to an all-group
+	// delivery guarantee from read-only topology checks.
+	if got := p.Publish(ctx, m).Outcome; got != transport.Confirmed {
+		t.Fatalf("publish after required binding removal = %v, want broker Confirmed", got)
+	}
+	if err := <-cutover; err != nil {
+		t.Fatal(err)
+	}
+	worker, ok, err := setup.Get(workerQueue, false)
+	if err != nil || !ok || worker.MessageId != m.Input().ID {
+		t.Fatalf("worker delivery: present=%v id=%q error=%v", ok, worker.MessageId, err)
+	}
+	if err := worker.Ack(false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := setup.Get(hotRankQueue, false); err != nil || ok {
+		t.Fatalf("missing hot-rank delivery after cutover: present=%v error=%v", ok, err)
 	}
 	if err := p.Drain(ctx); err != nil {
 		t.Fatal(err)
