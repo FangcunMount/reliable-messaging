@@ -146,15 +146,16 @@ func getAndAck(ctx context.Context, channel *amqp.Channel, id string, body []byt
 func run(phase string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if phase == "seed" {
+	switch phase {
+	case "seed":
 		if err := waitNodes(ctx, 3); err != nil {
 			return err
 		}
-	} else if phase == "recover" {
+	case "recover":
 		if err := waitNodes(ctx, 2); err != nil {
 			return err
 		}
-	} else {
+	default:
 		return fmt.Errorf("unknown phase %q", phase)
 	}
 	conn, err := amqp.Dial("amqp://rmtest:rmtest@127.0.0.1:5672/")
