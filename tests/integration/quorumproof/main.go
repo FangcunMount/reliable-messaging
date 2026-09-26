@@ -426,6 +426,7 @@ func run(phase string) error {
 		if err := getAndAck(ctx, channel, originalID, originalBody, true); err != nil {
 			return err
 		}
+		fmt.Println("PASS RabbitMQ original redelivered and ACKed after consumer SIGKILL")
 		if err := receiveNSQAfterCrash(ctx); err != nil {
 			return err
 		}
