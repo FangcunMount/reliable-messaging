@@ -228,6 +228,7 @@ func seedNSQ(ctx context.Context) error {
 	}
 	config := nsq.NewConfig()
 	config.ReadTimeout = 3 * time.Second
+	config.HeartbeatInterval = time.Second
 	config.WriteTimeout = time.Second
 	producer, err := nsq.NewProducer("nsqd:4150", config)
 	if err != nil {
