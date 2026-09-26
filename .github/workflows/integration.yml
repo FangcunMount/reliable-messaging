@@ -14,3 +14,13 @@ jobs:
         with:
           go-version: '1.25.12'
       - run: make integration
+  quorum:
+    if: startsWith(github.head_ref || github.ref_name, 'codex/b0-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.12'
+      - run: bash scripts/quorum-integration.sh
