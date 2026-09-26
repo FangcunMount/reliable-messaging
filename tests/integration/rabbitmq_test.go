@@ -105,4 +105,50 @@ func TestRabbitMQPublisherConfirmReturnAndOriginalWire(t *testing.T) {
 	if err := p.Drain(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if err := ch.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A host that forgets confirm mode may still route the bytes. The SDK must
+	// not mark that write Confirmed, so a later retry remains possible.
+	noConfirm, err := conn.Channel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknownPublisher, err := adapter.New(noConfirm, map[string]adapter.Route{
+		"assessment": {Exchange: exchange, RoutingKey: "worker"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := unknownPublisher.Publish(ctx, m).Outcome; got != transport.Unknown {
+		t.Fatalf("publish without confirm mode = %v, want Unknown", got)
+	}
+	if err := unknownPublisher.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := noConfirm.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Reconnecting is host-owned: a fresh channel must re-enter confirm mode
+	// and register fresh return/close listeners before publication resumes.
+	reconnected, err := conn.Channel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reconnected.Close()
+	if err := reconnected.Confirm(false); err != nil {
+		t.Fatal(err)
+	}
+	retryPublisher, err := adapter.New(reconnected, map[string]adapter.Route{
+		"assessment": {Exchange: exchange, RoutingKey: "worker"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := retryPublisher.Publish(ctx, m).Outcome; got != transport.Confirmed {
+		t.Fatalf("reconnected original-identity publish = %v, want Confirmed", got)
+	}
+	if err := retryPublisher.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
