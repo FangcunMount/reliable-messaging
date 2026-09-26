@@ -14,12 +14,17 @@ import (
 	"sort"
 	"time"
 
+	"github.com/FangcunMount/reliable-messaging/message"
+	"github.com/FangcunMount/reliable-messaging/transport"
+	sdknsq "github.com/FangcunMount/reliable-messaging/transport/nsq"
+	"github.com/nsqio/go-nsq"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 const (
 	queueName  = "rm.b0.quorum.node-loss"
 	originalID = "b0-confirmed-before-leader-loss"
+	nsqTopic   = "rm-b0-comparison"
 )
 
 var originalBody = []byte(`{"identity":"b0-confirmed-before-leader-loss"}`)
@@ -143,6 +148,114 @@ func getAndAck(ctx context.Context, channel *amqp.Channel, id string, body []byt
 	}
 }
 
+func waitNSQDepth(ctx context.Context, expected int64) error {
+	client := &http.Client{Timeout: 3 * time.Second}
+	stable := 0
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://nsqd:4151/stats?format=json", nil)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		var stats struct {
+			Topics []struct {
+				Name     string `json:"topic_name"`
+				Depth    *int64 `json:"depth"`
+				Backend  *int64 `json:"backend_depth"`
+				Channels []struct {
+					Name     string `json:"channel_name"`
+					Depth    *int64 `json:"depth"`
+					Backend  *int64 `json:"backend_depth"`
+					InFlight *int64 `json:"in_flight_count"`
+					Deferred *int64 `json:"deferred_count"`
+				} `json:"channels"`
+			} `json:"topics"`
+		}
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&stats)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || decodeErr != nil {
+			return fmt.Errorf("NSQ stats: HTTP %d decode %v", resp.StatusCode, decodeErr)
+		}
+		matched := false
+		for _, topic := range stats.Topics {
+			if topic.Name != nsqTopic || topic.Depth == nil || topic.Backend == nil || *topic.Depth != 0 || *topic.Backend != 0 {
+				continue
+			}
+			for _, channel := range topic.Channels {
+				if channel.Name == nsqTopic && channel.Depth != nil && channel.Backend != nil &&
+					channel.InFlight != nil && channel.Deferred != nil && *channel.Depth == expected &&
+					*channel.Backend == 0 && *channel.InFlight == 0 && *channel.Deferred == 0 {
+					matched = true
+				}
+			}
+		}
+		if matched {
+			stable++
+			if stable >= 3 {
+				return nil
+			}
+		} else {
+			stable = 0
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("NSQ channel expected depth %d not stable: %w", expected, ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+func seedNSQ(ctx context.Context) error {
+	for _, path := range []string{
+		"/topic/create?topic=" + nsqTopic,
+		"/channel/create?topic=" + nsqTopic + "&channel=" + nsqTopic,
+	} {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://nsqd:4151"+path, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("create NSQ channel: HTTP %d", resp.StatusCode)
+		}
+	}
+	config := nsq.NewConfig()
+	config.ReadTimeout = 3 * time.Second
+	config.WriteTimeout = time.Second
+	producer, err := nsq.NewProducer("nsqd:4150", config)
+	if err != nil {
+		return err
+	}
+	defer producer.Stop()
+	producer.SetLogger(nil, nsq.LogLevelError)
+	publisher, err := sdknsq.New(producer, map[string]string{"assessment": nsqTopic}, 1)
+	if err != nil {
+		return err
+	}
+	intent, err := message.New(message.Input{
+		Producer: "b0-comparison", ID: originalID, Destination: "assessment",
+		EventType: "answersheet.submitted", SchemaVersion: "1", Scope: "global",
+		ContentType: "application/json", OccurredAt: "2026-09-27T00:00:00+08:00", Payload: originalBody,
+	})
+	if err != nil {
+		return err
+	}
+	if outcome := publisher.Publish(ctx, intent).Outcome; outcome != transport.Confirmed {
+		return fmt.Errorf("NSQ SDK outcome %v, want Confirmed", outcome)
+	}
+	if err := publisher.Drain(ctx); err != nil {
+		return err
+	}
+	return waitNSQDepth(ctx, 1)
+}
+
 func run(phase string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -180,13 +293,19 @@ func run(phase string) error {
 		if err := publish(ctx, channel, originalID, originalBody); err != nil {
 			return err
 		}
-		fmt.Println("PASS three-member quorum confirmed original persistent message before leader SIGKILL")
+		if err := seedNSQ(ctx); err != nil {
+			return err
+		}
+		fmt.Println("PASS same original ID/body confirmed by RabbitMQ quorum and NSQ; NSQ copy observed only in channel memory")
 		return nil
 	}
 	if err := waitQueue(ctx, "survivor", 2); err != nil {
 		return err
 	}
 	if err := getAndAck(ctx, channel, originalID, originalBody); err != nil {
+		return err
+	}
+	if err := waitNSQDepth(ctx, 0); err != nil {
 		return err
 	}
 	const afterID = "b0-after-leader-loss"
@@ -197,7 +316,7 @@ func run(phase string) error {
 	if err := getAndAck(ctx, channel, afterID, afterBody); err != nil {
 		return err
 	}
-	fmt.Println("PASS confirmed original survived leader SIGKILL; two remaining members accepted and consumed a new message")
+	fmt.Println("PASS same original survived RabbitMQ leader SIGKILL; NSQ confirmed in-memory copy was lost after nsqd SIGKILL; RabbitMQ majority accepted a new message")
 	return nil
 }
 

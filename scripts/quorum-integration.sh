@@ -42,5 +42,12 @@ leader_id=$("${compose[@]}" ps -a -q rabbitmq1)
   echo 'RabbitMQ leader SIGKILL was not observed' >&2
   exit 1
 }
+"${compose[@]}" kill --signal SIGKILL nsqd
+nsq_id=$("${compose[@]}" ps -a -q nsqd)
+[[ $(docker inspect --format '{{.State.ExitCode}}' "$nsq_id") == 137 ]] || {
+  echo 'NSQ SIGKILL was not observed' >&2
+  exit 1
+}
+"${compose[@]}" up -d --wait --wait-timeout 60 nsqd
 "${compose[@]}" exec -T rabbitmq2 /tmp/quorumproof recover
 "${compose[@]}" exec -T rabbitmq2 rabbitmq-queues quorum_status rm.b0.quorum.node-loss
