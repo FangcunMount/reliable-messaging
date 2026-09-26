@@ -73,7 +73,7 @@ func mongoDrain(ctx context.Context, client *driver.Client, expected ...string) 
 		return err
 	}
 	if len(claims) != len(expected) {
-		return fmt.Errorf("Mongo claimed %d rows, want %d", len(claims), len(expected))
+		return fmt.Errorf("mongo claimed %d rows, want %d", len(claims), len(expected))
 	}
 	want := make(map[string]bool, len(expected))
 	for _, id := range expected {
@@ -160,7 +160,7 @@ func runMongo(ctx context.Context, client *driver.Client, phase string) error {
 			return err
 		}
 		if facts != 4 || total != 4 || published != 4 || missingCreated != 3 {
-			return fmt.Errorf("Mongo final facts=%d outbox=%d published=%d old-without-created-at=%d", facts, total, published, missingCreated)
+			return fmt.Errorf("mongo final facts=%d outbox=%d published=%d old-without-created-at=%d", facts, total, published, missingCreated)
 		}
 		fmt.Println("PASS actual Mongo v0.1.0 drained ordinary v0.2.1 pending; four host facts and original identities remain")
 		fmt.Println("OBSERVED three v0.1.0 documents still lack created_at; host status reader needs separate compatibility handling")
