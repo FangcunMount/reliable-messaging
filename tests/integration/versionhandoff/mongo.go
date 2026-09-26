@@ -241,6 +241,26 @@ func runMongo(ctx context.Context, client *driver.Client, phase string) error {
 			return err
 		}
 		fmt.Println("PASS Mongo v0.2.1 quarantined original identity; diagnostic failure_count undercounts old retries")
+	case "mongo-old-lease-seed":
+		if err := mongoLeaseSeed(ctx, client, "old-lease"); err != nil {
+			return err
+		}
+		fmt.Println("PASS Mongo v0.1.0 left original old-lease in publishing")
+	case "mongo-new-lease-recover":
+		if err := mongoLeaseRecover(ctx, client, "old-lease"); err != nil {
+			return err
+		}
+		fmt.Println("PASS Mongo v0.2.1 respected and recovered v0.1.0 lease; stale claim fenced")
+	case "mongo-new-lease-seed":
+		if err := mongoLeaseSeed(ctx, client, "new-lease"); err != nil {
+			return err
+		}
+		fmt.Println("PASS Mongo v0.2.1 left original new-lease in publishing")
+	case "mongo-old-lease-recover":
+		if err := mongoLeaseRecover(ctx, client, "new-lease"); err != nil {
+			return err
+		}
+		fmt.Println("PASS Mongo v0.1.0 respected and recovered v0.2.1 lease; stale claim fenced")
 	default:
 		return fmt.Errorf("unknown Mongo phase %q", phase)
 	}

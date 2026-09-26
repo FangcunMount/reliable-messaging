@@ -228,6 +228,26 @@ func run(ctx context.Context, db *sql.DB, phase string) error {
 			return err
 		}
 		fmt.Println("PASS MySQL v0.2.1 quarantined original identity; diagnostic failure_count undercounts old retries")
+	case "old-lease-seed":
+		if err := mysqlLeaseSeed(ctx, db, "old-lease"); err != nil {
+			return err
+		}
+		fmt.Println("PASS MySQL v0.1.0 left original old-lease in publishing")
+	case "new-lease-recover":
+		if err := mysqlLeaseRecover(ctx, db, "old-lease"); err != nil {
+			return err
+		}
+		fmt.Println("PASS MySQL v0.2.1 respected and recovered v0.1.0 lease; stale claim fenced")
+	case "new-lease-seed":
+		if err := mysqlLeaseSeed(ctx, db, "new-lease"); err != nil {
+			return err
+		}
+		fmt.Println("PASS MySQL v0.2.1 left original new-lease in publishing")
+	case "old-lease-recover":
+		if err := mysqlLeaseRecover(ctx, db, "new-lease"); err != nil {
+			return err
+		}
+		fmt.Println("PASS MySQL v0.1.0 respected and recovered v0.2.1 lease; stale claim fenced")
 	default:
 		return fmt.Errorf("unknown phase %q", phase)
 	}
