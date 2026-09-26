@@ -30,6 +30,19 @@ services:
       interval: 2s
       timeout: 5s
       retries: 60
+  rabbitmq:
+    image: rabbitmq:4.3-management@sha256:ddc75301edf58a8332934cf2d801be7cbf8d65c6458d747364a8046238ff1c89
+    # Keep the healthcheck from creating a root-owned Erlang cookie while the
+    # broker starts as rabbitmq (observed in concurrent GitHub Actions runs).
+    user: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: rmtest
+      RABBITMQ_DEFAULT_PASS: rmtest
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 2s
+      timeout: 5s
+      retries: 60
 networks:
   default:
     internal: true

@@ -7,6 +7,7 @@ toolchain go1.25.12
 require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/nsqio/go-nsq v1.1.0
+	github.com/rabbitmq/amqp091-go v1.10.0
 	go.mongodb.org/mongo-driver v1.17.6
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.30.0
