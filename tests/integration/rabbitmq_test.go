@@ -406,3 +406,127 @@ func TestRabbitMQBindingRemovedAfterTopologyCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// This is a broker-level design experiment, not an SDK Publisher contract.
+// Directing one publish to each required queue makes each group's acceptance
+// observable, but a partial success forces a retry with the original identity
+// and therefore can deliver a duplicate to an already-confirmed group.
+func TestRabbitMQDirectedGroupPartialRecovery(t *testing.T) {
+	address := os.Getenv("RM_TEST_RABBITMQ_URL")
+	if address == "" {
+		t.Fatal("isolated RM_TEST_RABBITMQ_URL required")
+	}
+	conn, err := amqp.Dial(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	setup, err := conn.Channel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer setup.Close()
+	const workerQueue = "rm.b0.directed.integration.worker"
+	const hotRankQueue = "rm.b0.directed.integration.hot-rank"
+	for _, queue := range []string{workerQueue, hotRankQueue} {
+		if _, err := setup.QueueDeclare(queue, true, false, false, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() {
+		for _, queue := range []string{workerQueue, hotRankQueue} {
+			if _, err := setup.QueueDelete(queue, false, false, false); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+
+	pub, err := conn.Channel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pub.Close()
+	if err := pub.Confirm(false); err != nil {
+		t.Fatal(err)
+	}
+	returns := pub.NotifyReturn(make(chan amqp.Return, 1))
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	const originalID = "partial-group-b0"
+	body := []byte(`{"id":"partial-group-b0"}`)
+	publishTo := func(queue string) bool {
+		t.Helper()
+		confirmation, err := pub.PublishWithDeferredConfirmWithContext(ctx, "", queue, true, false, amqp.Publishing{
+			DeliveryMode: amqp.Persistent, MessageId: originalID,
+			ContentType: "application/json", Type: "answersheet.submitted", Body: body,
+		})
+		if err != nil || confirmation == nil {
+			t.Fatalf("publish to %s: confirmation=%v error=%v", queue, confirmation, err)
+		}
+		returned := false
+		checkReturn := func(ret amqp.Return) {
+			t.Helper()
+			if ret.MessageId != originalID || !bytes.Equal(ret.Body, body) {
+				t.Fatalf("return from %s changed original identity or bytes", queue)
+			}
+			returned = true
+		}
+		for {
+			select {
+			case ret := <-returns:
+				checkReturn(ret)
+			case <-confirmation.Done():
+				select {
+				case ret := <-returns:
+					checkReturn(ret)
+				default:
+				}
+				if !confirmation.Acked() {
+					t.Fatalf("broker nack for %s", queue)
+				}
+				return returned
+			case <-ctx.Done():
+				t.Fatalf("confirm for %s: %v", queue, ctx.Err())
+			}
+		}
+	}
+	getOriginal := func(queue string) {
+		t.Helper()
+		delivery, ok, err := setup.Get(queue, false)
+		if err != nil || !ok || delivery.MessageId != originalID || !bytes.Equal(delivery.Body, body) {
+			t.Fatalf("delivery to %s: present=%v id=%q error=%v", queue, ok, delivery.MessageId, err)
+		}
+		if err := delivery.Ack(false); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if publishTo(workerQueue) {
+		t.Fatal("worker was unexpectedly returned")
+	}
+	getOriginal(workerQueue)
+	if _, err := setup.QueueDelete(hotRankQueue, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	// A broker ack still follows mandatory return for the missing group.
+	// The first group's confirmation cannot settle the whole logical message.
+	if !publishTo(hotRankQueue) {
+		t.Fatal("missing hot-rank queue was not returned")
+	}
+	if _, err := setup.QueueDeclare(hotRankQueue, true, false, false, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Retrying the whole logical message with the same ID reaches both groups;
+	// Worker sees a second physical delivery, requiring consumer idempotency.
+	for _, queue := range []string{workerQueue, hotRankQueue} {
+		if publishTo(queue) {
+			t.Fatalf("restored group %s was returned", queue)
+		}
+		getOriginal(queue)
+	}
+	for _, queue := range []string{workerQueue, hotRankQueue} {
+		if _, ok, err := setup.Get(queue, false); err != nil || ok {
+			t.Fatalf("unexpected extra delivery to %s: present=%v error=%v", queue, ok, err)
+		}
+	}
+}
