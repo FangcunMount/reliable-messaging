@@ -12,6 +12,7 @@ Current probes:
 - Mongo replica-set initialization, primary readiness and real two-collection commit/abort.
 - NSQ publish accepted and message present in the intended channel.
 - SDK transaction/fencing, Relay process failure, database write failure, publication-confirmation loss and late-result tests.
+- Actual SDK `v0.1.0` and `v0.2.1` binaries built from verified release tags: old transaction and pending intent, new Store rejection before additive DDL, old Appender after DDL, new Store draining old identities, and old Store draining an ordinary new pending intent. This is a sequential, basic-state handoff on disposable MySQL; it does not prove concurrent old/new Relays, diagnostic-field fidelity after downgrade, Mongo compatibility or a production rollback window.
 - Real graceful NSQ stop/start over the same disposable volume: 10 preconfirmed messages retain original identities/bytes.
 - A compiled Go SQL example executing in the isolated MySQL container, and a host lifecycle reference running locally.
 
