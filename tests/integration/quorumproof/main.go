@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/FangcunMount/reliable-messaging/message"
@@ -25,15 +26,17 @@ const (
 	queueName  = "rm.b0.quorum.node-loss"
 	originalID = "b0-confirmed-before-leader-loss"
 	nsqTopic   = "rm-b0-comparison"
+	ackPIDPath = "/tmp/quorumproof-ack-take.pid"
 )
 
 var originalBody = []byte(`{"identity":"b0-confirmed-before-leader-loss"}`)
 
 type queueStatus struct {
-	Type    string   `json:"type"`
-	Leader  string   `json:"leader"`
-	Members []string `json:"members"`
-	Online  []string `json:"online"`
+	Type                   string   `json:"type"`
+	Leader                 string   `json:"leader"`
+	Members                []string `json:"members"`
+	Online                 []string `json:"online"`
+	MessagesUnacknowledged int64    `json:"messages_unacknowledged"`
 }
 
 type nodeStatus struct {
@@ -128,15 +131,16 @@ func publish(ctx context.Context, channel *amqp.Channel, id string, body []byte)
 	return nil
 }
 
-func getAndAck(ctx context.Context, channel *amqp.Channel, id string, body []byte) error {
+func getAndAck(ctx context.Context, channel *amqp.Channel, id string, body []byte, expectRedelivered bool) error {
 	for {
 		delivery, found, err := channel.Get(queueName, false)
 		if err != nil {
 			return err
 		}
 		if found {
-			if delivery.MessageId != id || !bytes.Equal(delivery.Body, body) || delivery.DeliveryMode != amqp.Persistent {
-				return fmt.Errorf("delivery changed original identity, bytes or persistence mode")
+			if delivery.MessageId != id || !bytes.Equal(delivery.Body, body) || delivery.DeliveryMode != amqp.Persistent ||
+				delivery.Redelivered != expectRedelivered {
+				return fmt.Errorf("delivery changed original identity, bytes, persistence mode or redelivery flag")
 			}
 			return delivery.Ack(false)
 		}
@@ -148,7 +152,7 @@ func getAndAck(ctx context.Context, channel *amqp.Channel, id string, body []byt
 	}
 }
 
-func waitNSQDepth(ctx context.Context, expected int64) error {
+func waitNSQState(ctx context.Context, expectedDepth, expectedInFlight int64) error {
 	client := &http.Client{Timeout: 3 * time.Second}
 	stable := 0
 	for {
@@ -186,8 +190,8 @@ func waitNSQDepth(ctx context.Context, expected int64) error {
 			}
 			for _, channel := range topic.Channels {
 				if channel.Name == nsqTopic && channel.Depth != nil && channel.Backend != nil &&
-					channel.InFlight != nil && channel.Deferred != nil && *channel.Depth == expected &&
-					*channel.Backend == 0 && *channel.InFlight == 0 && *channel.Deferred == 0 {
+					channel.InFlight != nil && channel.Deferred != nil && *channel.Depth == expectedDepth &&
+					*channel.Backend == 0 && *channel.InFlight == expectedInFlight && *channel.Deferred == 0 {
 					matched = true
 				}
 			}
@@ -202,7 +206,7 @@ func waitNSQDepth(ctx context.Context, expected int64) error {
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("NSQ channel expected depth %d not stable: %w", expected, ctx.Err())
+			return fmt.Errorf("NSQ channel expected depth %d and in-flight %d not stable: %w", expectedDepth, expectedInFlight, ctx.Err())
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
@@ -254,7 +258,101 @@ func seedNSQ(ctx context.Context) error {
 	if err := publisher.Drain(ctx); err != nil {
 		return err
 	}
-	return waitNSQDepth(ctx, 1)
+	return waitNSQState(ctx, 1, 0)
+}
+
+func nsqConsumer() (*nsq.Consumer, error) {
+	config := nsq.NewConfig()
+	config.ReadTimeout = 3 * time.Second
+	config.HeartbeatInterval = time.Second
+	config.WriteTimeout = time.Second
+	config.MaxInFlight = 1
+	consumer, err := nsq.NewConsumer(nsqTopic, nsqTopic, config)
+	if err == nil {
+		consumer.SetLogger(nil, nsq.LogLevelError)
+	}
+	return consumer, err
+}
+
+func takeWithoutAck(ctx context.Context, channel *amqp.Channel) error {
+	delivery, found, err := channel.Get(queueName, false)
+	if err != nil || !found {
+		return fmt.Errorf("RabbitMQ first unacked delivery: found=%t error=%w", found, err)
+	}
+	if delivery.MessageId != originalID || !bytes.Equal(delivery.Body, originalBody) || delivery.Redelivered {
+		return errors.New("RabbitMQ first unacked delivery changed identity, bytes or redelivery flag")
+	}
+	consumer, err := nsqConsumer()
+	if err != nil {
+		return err
+	}
+	received := make(chan *nsq.Message, 1)
+	consumer.AddHandler(nsq.HandlerFunc(func(m *nsq.Message) error {
+		m.DisableAutoResponse()
+		received <- m
+		return nil
+	}))
+	if err := consumer.ConnectToNSQD("nsqd:4150"); err != nil {
+		return err
+	}
+	select {
+	case m := <-received:
+		if !bytes.Equal(m.Body, originalBody) || m.Attempts != 1 {
+			return fmt.Errorf("NSQ first unacked delivery changed bytes or attempt: %d", m.Attempts)
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := os.WriteFile(ackPIDPath, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		return err
+	}
+	fmt.Println("PASS both brokers handed the original bytes to a consumer without ACK/FIN")
+	select {}
+}
+
+func waitBothInFlight(ctx context.Context) error {
+	for {
+		var queue queueStatus
+		if err := getJSON(ctx, "/api/queues/%2F/"+queueName, &queue); err == nil &&
+			queue.MessagesUnacknowledged == 1 {
+			if err := waitNSQState(ctx, 0, 1); err == nil {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("both original deliveries did not remain in-flight: %w", ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func receiveNSQAfterCrash(ctx context.Context) error {
+	consumer, err := nsqConsumer()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		consumer.Stop()
+		<-consumer.StopChan
+	}()
+	received := make(chan *nsq.Message, 1)
+	consumer.AddHandler(nsq.HandlerFunc(func(m *nsq.Message) error {
+		received <- m
+		return nil
+	}))
+	if err := consumer.ConnectToNSQD("nsqd:4150"); err != nil {
+		return err
+	}
+	select {
+	case m := <-received:
+		if !bytes.Equal(m.Body, originalBody) || m.Attempts < 2 {
+			return fmt.Errorf("NSQ redelivery changed original bytes or attempt: %d", m.Attempts)
+		}
+		return waitNSQState(ctx, 0, 0)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func run(phase string) error {
@@ -265,7 +363,7 @@ func run(phase string) error {
 		if err := waitNodes(ctx, 3); err != nil {
 			return err
 		}
-	case "recover":
+	case "recover", "ack-seed", "ack-take", "ack-inflight", "ack-recover":
 		if err := waitNodes(ctx, 2); err != nil {
 			return err
 		}
@@ -303,10 +401,36 @@ func run(phase string) error {
 	if err := waitQueue(ctx, "survivor", 2); err != nil {
 		return err
 	}
-	if err := getAndAck(ctx, channel, originalID, originalBody); err != nil {
+	if phase == "ack-seed" {
+		if err := publish(ctx, channel, originalID, originalBody); err != nil {
+			return err
+		}
+		if err := seedNSQ(ctx); err != nil {
+			return err
+		}
+		fmt.Println("PASS same original re-seeded for consumer ACK-loss comparison")
+		return nil
+	}
+	if phase == "ack-take" {
+		return takeWithoutAck(ctx, channel)
+	}
+	if phase == "ack-inflight" {
+		return waitBothInFlight(ctx)
+	}
+	if phase == "ack-recover" {
+		if err := getAndAck(ctx, channel, originalID, originalBody, true); err != nil {
+			return err
+		}
+		if err := receiveNSQAfterCrash(ctx); err != nil {
+			return err
+		}
+		fmt.Println("PASS same original redelivered after consumer SIGKILL by RabbitMQ and NSQ, then ACK/FIN drained")
+		return nil
+	}
+	if err := getAndAck(ctx, channel, originalID, originalBody, false); err != nil {
 		return err
 	}
-	if err := waitNSQDepth(ctx, 0); err != nil {
+	if err := waitNSQState(ctx, 0, 0); err != nil {
 		return err
 	}
 	const afterID = "b0-after-leader-loss"
@@ -314,7 +438,7 @@ func run(phase string) error {
 	if err := publish(ctx, channel, afterID, afterBody); err != nil {
 		return err
 	}
-	if err := getAndAck(ctx, channel, afterID, afterBody); err != nil {
+	if err := getAndAck(ctx, channel, afterID, afterBody, false); err != nil {
 		return err
 	}
 	fmt.Println("PASS same original survived RabbitMQ leader SIGKILL; NSQ confirmed in-memory copy was lost after nsqd SIGKILL; RabbitMQ majority accepted a new message")
@@ -323,7 +447,7 @@ func run(phase string) error {
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: quorumproof seed|recover")
+		fmt.Fprintln(os.Stderr, "usage: quorumproof seed|recover|ack-seed|ack-take|ack-inflight|ack-recover")
 		os.Exit(2)
 	}
 	if err := run(os.Args[1]); err != nil {

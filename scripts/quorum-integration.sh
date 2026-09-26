@@ -15,7 +15,10 @@ build_dir=$(mktemp -d "${TMPDIR:-/tmp}/$project-build.XXXXXX")
 cleanup() {
   result=$?
   trap - EXIT
-  if ((result != 0)); then "${compose[@]}" logs --no-color --tail 50 || true; fi
+  if ((result != 0)); then
+    "${compose[@]}" logs --no-color --tail 50 || true
+    "${compose[@]}" exec -T rabbitmq2 sh -c 'test ! -f /tmp/quorumproof-ack-take.log || cat /tmp/quorumproof-ack-take.log' || true
+  fi
   if ! "${compose[@]}" down --volumes --remove-orphans --timeout 10; then result=1; fi
   rm -rf -- "$build_dir"
   exit "$result"
@@ -51,3 +54,8 @@ nsq_id=$("${compose[@]}" ps -a -q nsqd)
 "${compose[@]}" up -d --wait --wait-timeout 60 nsqd
 "${compose[@]}" exec -T rabbitmq2 /tmp/quorumproof recover
 "${compose[@]}" exec -T rabbitmq2 rabbitmq-queues quorum_status rm.b0.quorum.node-loss
+"${compose[@]}" exec -T rabbitmq2 /tmp/quorumproof ack-seed
+"${compose[@]}" exec -d rabbitmq2 sh -c '/tmp/quorumproof ack-take >/tmp/quorumproof-ack-take.log 2>&1'
+"${compose[@]}" exec -T rabbitmq2 /tmp/quorumproof ack-inflight
+"${compose[@]}" exec -T rabbitmq2 sh -ec 'test -s /tmp/quorumproof-ack-take.pid; kill -KILL "$(cat /tmp/quorumproof-ack-take.pid)"'
+"${compose[@]}" exec -T rabbitmq2 /tmp/quorumproof ack-recover
