@@ -120,8 +120,9 @@ func mongoRetryState(ctx context.Context, client *driver.Client, code string, wa
 	if !claimed {
 		return errors.New("original mongo retry identity was not due")
 	}
-	if claim.Message.Input().ID != "state-retry" {
-		return fmt.Errorf("unexpected mongo retry identity %q", claim.Message.Input().ID)
+	in := claim.Message.Input()
+	if in.ID != "state-retry" || in.Producer != "version-handoff" || in.Destination != "events" || string(in.Payload) != `{"message_id":"state-retry"}` {
+		return fmt.Errorf("unexpected mongo retry identity or bytes %q", in.ID)
 	}
 	if quarantine {
 		err = s.Quarantine(ctx, claim, code)
