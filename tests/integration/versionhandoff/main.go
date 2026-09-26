@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/FangcunMount/reliable-messaging/message"
@@ -163,11 +164,23 @@ func run(ctx context.Context, db *sql.DB, phase string) error {
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: versionhandoff old-seed|new-before-ddl|old-after-ddl|new-drain|old-drain")
+		fmt.Fprintln(os.Stderr, "usage: versionhandoff old-seed|new-before-ddl|old-after-ddl|new-drain|old-drain|mongo-...")
 		os.Exit(2)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if strings.HasPrefix(os.Args[1], "mongo-") {
+		client, err := mongoClient(ctx)
+		if err == nil {
+			defer client.Disconnect(context.Background())
+			err = runMongo(ctx, client, os.Args[1])
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	db, err := open()
 	if err == nil {
 		defer db.Close()

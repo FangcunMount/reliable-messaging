@@ -62,7 +62,7 @@ build_released_handoff() {
   }
   mkdir -p "$source_dir/versionhandoff"
   git -C "$repo" archive "$tag" | tar -xf - -C "$source_dir"
-  cp "$repo/tests/integration/versionhandoff/main.go" "$source_dir/versionhandoff/main.go"
+  cp "$repo/tests/integration/versionhandoff/"*.go "$source_dir/versionhandoff/"
   (cd "$source_dir" && GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -o "$build_dir/handoff-$label.bin" ./versionhandoff)
   "${compose[@]}" cp "$build_dir/handoff-$label.bin" "mysql:/tmp/handoff-$label"
 }
@@ -79,6 +79,12 @@ handoff_dsn='root@tcp(127.0.0.1:3306)/rm_sdk_version_handoff?parseTime=true&loc=
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-after-ddl
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-drain
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-drain
+handoff_mongo_uri='mongodb://mongo:27017/?replicaSet=rm-test'
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-index
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-after-index
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-drain
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-drain
 
 
 
