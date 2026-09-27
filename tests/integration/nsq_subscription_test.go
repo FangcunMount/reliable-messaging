@@ -12,6 +12,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -498,13 +500,15 @@ func TestNSQSubscriberLookupdTopology(t *testing.T) {
 
 // A lookupd HTTP outage must not settle an already connected broker delivery
 // early. The same Subscriber also has to resume polling after discovery returns.
-// This does not prove discovery of a new nsqd while lookupd is unavailable.
+// A second nsqd joins during the outage. After discovery returns, the business
+// consumer connects; terminal handoff then connects the failure consumer on
+// that same new source node before publishing its failure record.
 func TestNSQSubscriberLookupdOutageWithConnectedBroker(t *testing.T) {
-	address, lookupd, nsqdHTTP := os.Getenv("RM_TEST_NSQ_TCP"), os.Getenv("RM_TEST_NSQ_LOOKUPD"), os.Getenv("RM_TEST_NSQ_HTTP")
-	if address == "" || lookupd == "" || nsqdHTTP == "" {
-		t.Fatal("isolated NSQ and lookupd addresses required")
+	address, lookupd, nsqdHTTP, binary := os.Getenv("RM_TEST_NSQ_TCP"), os.Getenv("RM_TEST_NSQ_LOOKUPD"), os.Getenv("RM_TEST_NSQ_HTTP"), os.Getenv("RM_TEST_NSQD_BINARY")
+	if address == "" || lookupd == "" || nsqdHTTP == "" || binary == "" {
+		t.Fatal("isolated NSQ, lookupd and pinned nsqd binary required")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	topic := fmt.Sprintf("rm-lookupd-outage-%d", time.Now().UnixNano())
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -592,13 +596,49 @@ func TestNSQSubscriberLookupdOutageWithConnectedBroker(t *testing.T) {
 	if firstID == "" {
 		t.Fatal("lookupd outage lost source transport identity")
 	}
+	peerHTTP := "http://127.0.0.1:4251"
+	dataDir := filepath.Join(t.TempDir(), "outage-peer-data")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(t.TempDir(), "outage-peer.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := exec.Command(binary,
+		"--tcp-address=0.0.0.0:4250", "--http-address=0.0.0.0:4251",
+		"--broadcast-address=mysql", "--lookupd-tcp-address=nsqlookupd:4160",
+		"--data-path="+dataDir, "--mem-queue-size=0", "--sync-every=1",
+	)
+	peer.Stdout, peer.Stderr = logFile, logFile
+	if err := peer.Start(); err != nil {
+		logFile.Close()
+		t.Fatal(err)
+	}
+	logFile.Close()
+	t.Cleanup(func() { _ = peer.Process.Kill(); _ = peer.Wait() })
+	waitForNSQPing(t, ctx, client, peerHTTP, logPath)
+	peerProvisioner, err := adapter.NewProvisioner(client, []string{peerHTTP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := peerProvisioner.EnsureChannel(ctx, topic, "business"); err != nil {
+		t.Fatal(err)
+	}
+	waitForNSQSource(t, ctx, client, lookupd, topic, "mysql", 4250)
+	if rejected.Load() == 0 {
+		t.Fatal("lookupd proxy did not reject discovery before new node joined")
+	}
 	beforeRecovery := successful.Load()
 	available.Store(true)
 	waitForNSQCondition(t, ctx, "lookupd polling recovery", func() bool { return successful.Load() > beforeRecovery })
-	secondID := publishAndAwaitNSQFailure(t, ctx, cfg, address, topic, "lookupd-recovered-uuid", "lookupd-down-uuid", failed)
+	waitForNSQChannelClient(t, ctx, client, peerHTTP, topic, "business")
+	secondID := publishAndAwaitNSQFailure(t, ctx, cfg, "127.0.0.1:4250", topic, "lookupd-new-node-uuid", "lookupd-down-uuid", failed)
 	if secondID == "" || secondID == firstID {
-		t.Fatal("lookupd recovery did not preserve distinct physical deliveries")
+		t.Fatal("new node after lookupd recovery did not preserve distinct physical deliveries")
 	}
+	waitForNSQChannelClient(t, ctx, client, peerHTTP, legacy.FailedHandoffTopic(topic, "business"), legacy.FailedHandoffChannel)
 }
 
 // IAM's policy channel changes with each process ID. A stable failed-handoff
