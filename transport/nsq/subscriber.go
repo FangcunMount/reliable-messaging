@@ -15,6 +15,7 @@ import (
 
 type SubscriberConfig struct {
 	NSQDAddresses      []string
+	LookupdAddresses   []string
 	Driver             *driver.Config
 	DeliveryContext    context.Context
 	MaxInFlight        int
@@ -33,8 +34,8 @@ type runningSubscription struct {
 // Subscriber owns the consumers and handoff producers it creates. NewSubscriber
 // only validates and copies configuration. Subscribe explicitly starts network
 // work; Close stops admission and waits for actual handlers and sends.
-// This first runtime accepts direct nsqd addresses. Lookupd discovery and a
-// full EventBus remain separate M6-04B work before IAM/QS migration.
+// The host explicitly selects direct nsqd or lookupd discovery. EventBus and
+// service integration remain separate M6-04B work before IAM/QS migration.
 type Subscriber struct {
 	config     SubscriberConfig
 	mu         sync.Mutex
@@ -44,8 +45,8 @@ type Subscriber struct {
 }
 
 func NewSubscriber(config SubscriberConfig) (*Subscriber, error) {
-	if len(config.NSQDAddresses) == 0 || config.MaxAttempts == 0 {
-		return nil, errors.New("NSQD addresses and bounded attempts required")
+	if (len(config.NSQDAddresses) == 0) == (len(config.LookupdAddresses) == 0) || config.MaxAttempts == 0 {
+		return nil, errors.New("exactly one of NSQD or lookupd addresses, plus bounded attempts, required")
 	}
 	if config.FailedHandoffGroup != "" && !driver.IsValidChannelName(config.FailedHandoffGroup) {
 		return nil, errors.New("invalid failed handoff group")
@@ -84,6 +85,7 @@ func NewSubscriber(config SubscriberConfig) (*Subscriber, error) {
 	copy.MaxInFlight = config.MaxInFlight
 	config.Driver = &copy
 	config.NSQDAddresses = addresses
+	config.LookupdAddresses = append([]string(nil), config.LookupdAddresses...)
 	return &Subscriber{config: config, identities: make(map[string]struct{})}, nil
 }
 
@@ -99,6 +101,9 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, channel string, handl
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if !driver.IsValidTopicName(topic) || !driver.IsValidChannelName(channel) || handler == nil || failed == nil {
+		return errors.New("valid topic, channel, handler and durable failure handler required")
+	}
 	identity := topic + "\x00" + channel
 	if _, exists := s.identities[identity]; exists {
 		return errors.New("duplicate NSQ topic/channel subscription")
@@ -111,6 +116,14 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, channel string, handl
 		if running.binding.FailureTopic() == failureTopic {
 			return errors.New("duplicate NSQ failure topic in one subscriber")
 		}
+	}
+	addresses := s.config.NSQDAddresses
+	if len(s.config.LookupdAddresses) > 0 {
+		resolved, err := resolveTopicProducers(ctx, s.config.LookupdAddresses, topic)
+		if err != nil {
+			return fmt.Errorf("resolve NSQD producers for %s: %w", topic, err)
+		}
+		addresses = resolved
 	}
 	failureConsumer, err := driver.NewConsumer(failureTopic, legacy.FailedHandoffChannel, s.config.Driver)
 	if err != nil {
@@ -137,10 +150,10 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, channel string, handl
 	}
 	failureConsumer.AddConcurrentHandlers(binding.FailureHandler(s.config.DeliveryContext), s.config.MaxInFlight)
 	businessConsumer.AddConcurrentHandlers(binding.BusinessHandler(s.config.DeliveryContext), s.config.MaxInFlight)
-	if err := failureConsumer.ConnectToNSQDs(s.config.NSQDAddresses); err != nil {
+	if err := failureConsumer.ConnectToNSQDs(addresses); err != nil {
 		return errors.Join(fmt.Errorf("connect failure consumer: %w", err), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
 	}
-	if err := businessConsumer.ConnectToNSQDs(s.config.NSQDAddresses); err != nil {
+	if err := s.connectBusiness(businessConsumer, addresses); err != nil {
 		return errors.Join(fmt.Errorf("connect business consumer: %w", err), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
 	}
 	s.running = append(s.running, &runningSubscription{
@@ -148,6 +161,13 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, channel string, handl
 	})
 	s.identities[identity] = struct{}{}
 	return nil
+}
+
+func (s *Subscriber) connectBusiness(consumer *driver.Consumer, addresses []string) error {
+	if len(s.config.LookupdAddresses) > 0 {
+		return consumer.ConnectToNSQLookupds(s.config.LookupdAddresses)
+	}
+	return consumer.ConnectToNSQDs(addresses)
 }
 
 func cleanupPartial(business, failure *driver.Consumer, binding *Subscription, handoff *DirectHandoff) error {
