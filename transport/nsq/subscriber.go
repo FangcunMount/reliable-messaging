@@ -34,8 +34,8 @@ type runningSubscription struct {
 // Subscriber owns the consumers and handoff producers it creates. NewSubscriber
 // only validates and copies configuration. Subscribe explicitly starts network
 // work; Close stops admission and waits for actual handlers and sends.
-// The host explicitly selects direct nsqd or lookupd discovery. EventBus and
-// service integration remain separate M6-04B work before IAM/QS migration.
+// The host explicitly selects direct nsqd or lookupd discovery. IAM/QS
+// lifecycle wiring and durable failure audits remain service integration work.
 type Subscriber struct {
 	config     SubscriberConfig
 	mu         sync.Mutex

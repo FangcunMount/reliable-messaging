@@ -7,10 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -324,6 +328,111 @@ func TestNSQSubscriberLookupdTopology(t *testing.T) {
 	defer closeCancel()
 	if err := subscriber.Close(closeCtx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A lookupd HTTP outage must not settle an already connected broker delivery
+// early. The same Subscriber also has to resume polling after discovery returns.
+// This does not prove discovery of a new nsqd while lookupd is unavailable.
+func TestNSQSubscriberLookupdOutageWithConnectedBroker(t *testing.T) {
+	address, lookupd, nsqdHTTP := os.Getenv("RM_TEST_NSQ_TCP"), os.Getenv("RM_TEST_NSQ_LOOKUPD"), os.Getenv("RM_TEST_NSQ_HTTP")
+	if address == "" || lookupd == "" || nsqdHTTP == "" {
+		t.Fatal("isolated NSQ and lookupd addresses required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	topic := fmt.Sprintf("rm-lookupd-outage-%d", time.Now().UnixNano())
+	client := &http.Client{Timeout: 2 * time.Second}
+	provisioner, err := adapter.NewProvisioner(client, []string{nsqdHTTP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provisioner.EnsureChannel(ctx, topic, "business"); err != nil {
+		t.Fatal(err)
+	}
+	waitForNSQSource(t, ctx, client, lookupd, topic, "nsqd", 4150)
+
+	var available atomic.Bool
+	available.Store(true)
+	var rejected, successful atomic.Int64
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if !available.Load() {
+			rejected.Add(1)
+			http.Error(w, "lookupd temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		upstream, err := http.NewRequestWithContext(request.Context(), request.Method, "http://"+lookupd+request.URL.RequestURI(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		upstream.Header = request.Header.Clone() // preserve NSQ's version negotiation
+		response, err := client.Do(upstream)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer response.Body.Close()
+		for name, values := range response.Header {
+			for _, value := range values {
+				w.Header().Add(name, value)
+			}
+		}
+		w.WriteHeader(response.StatusCode)
+		_, _ = io.Copy(w, response.Body)
+		if response.StatusCode == http.StatusOK {
+			successful.Add(1)
+		}
+	}))
+	defer proxy.Close()
+	cfg := driver.NewConfig()
+	cfg.HeartbeatInterval = time.Second
+	cfg.DialTimeout = time.Second
+	cfg.ReadTimeout = 3 * time.Second
+	cfg.WriteTimeout = time.Second
+	cfg.LookupdPollInterval = 250 * time.Millisecond
+	cfg.LookupdPollJitter = 0
+	subscriber, err := adapter.NewSubscriber(adapter.SubscriberConfig{
+		LookupdAddresses: []string{strings.TrimPrefix(proxy.URL, "http://")}, Driver: cfg,
+		MaxInFlight: 1, MaxAttempts: 1,
+		Retry: adapter.Backoff{BaseDelay: 50 * time.Millisecond, MaxDelay: time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := make(chan legacy.FailedHandoff, 4)
+	if err := subscriber.Subscribe(ctx, topic, "business", func(context.Context, transport.Delivery) error {
+		return errors.New("dynamic node business failure")
+	}, func(_ context.Context, record legacy.FailedHandoff) error {
+		failed <- record
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// ConnectToNSQLookupds starts asynchronous discovery. The outage should
+	// begin only after both broker channels have actual consumer clients.
+	waitForNSQChannelClient(t, ctx, client, nsqdHTTP, topic, "business")
+	waitForNSQChannelClient(t, ctx, client, nsqdHTTP, legacy.FailedHandoffTopic(topic, "business"), legacy.FailedHandoffChannel)
+	defer func() {
+		closeCtx, stop := context.WithTimeout(context.Background(), 8*time.Second)
+		defer stop()
+		if err := subscriber.Close(closeCtx); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	available.Store(false)
+	waitForNSQCondition(t, ctx, "lookupd poll during outage", func() bool { return rejected.Load() > 0 })
+	firstID := publishAndAwaitNSQFailure(t, ctx, cfg, address, topic, "lookupd-down-uuid", "", failed)
+	if firstID == "" {
+		t.Fatal("lookupd outage lost source transport identity")
+	}
+	beforeRecovery := successful.Load()
+	available.Store(true)
+	waitForNSQCondition(t, ctx, "lookupd polling recovery", func() bool { return successful.Load() > beforeRecovery })
+	secondID := publishAndAwaitNSQFailure(t, ctx, cfg, address, topic, "lookupd-recovered-uuid", "lookupd-down-uuid", failed)
+	if secondID == "" || secondID == firstID {
+		t.Fatal("lookupd recovery did not preserve distinct physical deliveries")
 	}
 }
 
