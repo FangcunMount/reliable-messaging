@@ -2,7 +2,7 @@
 
 独立、经过裁剪的 Go 可靠消息 SDK。宿主在原业务事务中持久化消息意图，并管理 Relay 的运行与停止；首期复用 NSQ。
 
-**截至 2026-09-27：v0.2.1 已正式发布，M6 稳定化和消息能力归属迁移仍在进行。** M6 升级说明／隔离验证 PR #8 已合入 main；历史 wire 与失败中转 codec PR #9 仍是草稿，尚未发布或接入服务。其后的 NSQ 消费结算候选只提供 host-owned consumer 的 handler 绑定，还不是完整 Subscriber／EventBus。M6-04 的最终目标是由本 SDK 承载通用 MQ／消息能力，让 `component-base` 退出对应职责；IAM 与 qs-server 的现役订阅仍使用原组件。完整验收按项目实施规划逐项核对，不能从代码包存在推断生产切换完成。
+**截至 2026-09-27：v0.2.1 已正式发布，M6 稳定化和消息能力归属迁移仍在进行。** M6 升级说明／隔离验证 PR #8 已合入 main；历史 wire 与失败中转 codec PR #9 仍是草稿，尚未发布或接入服务。其后的 NSQ 消费候选提供直接 nsqd 地址下的 Subscriber、结算和失败中转，尚缺 lookupd 拓扑、EventBus 与宿主持久审计接入。M6-04 的最终目标是由本 SDK 承载通用 MQ／消息能力，让 `component-base` 退出对应职责；IAM 与 qs-server 的现役订阅仍使用原组件。完整验收按项目实施规划逐项核对，不能从代码包存在推断生产切换完成。
 
 ## 开发
 
@@ -17,7 +17,7 @@ make subscription-integration  # focused disposable NSQ consumer proof
 
 根目录单 module。只有实际需求出现时才创建适配器与公开包；当前 `tests/compatibility` 验证候选跨语言身份样例，`tests/architecture` 约束依赖边界。
 
-当前已实现消息身份、原事务追加、带凭证的状态转移、受监督投递接缝与传输发布适配；`wire/legacy` 候选封装现行 envelope 和失败中转格式。NSQ 消费候选已加入显式确认、有界失败中转和原 ID 保留的绑定，但宿主仍需手工装配消费者与持久审计；完整 Subscriber／EventBus、通用失败中转传输适配和服务迁移尚未完成。租户审批、业务重试授权、消费幂等、宿主迁移和上线操作仍属于各服务。
+当前已实现消息身份、原事务追加、带凭证的状态转移、受监督投递接缝与传输发布适配；`wire/legacy` 候选封装现行 envelope 和失败中转格式。NSQ 消费候选已加入显式确认、有界失败中转、原 ID 保留、直接 nsqd 订阅与 SDK 管理的失败中转生产者；lookupd 拓扑、完整 EventBus、服务持久审计接入和迁移尚未完成。租户审批、业务重试授权、消费幂等、宿主迁移和上线操作仍属于各服务。
 
 ## 可靠性边界
 

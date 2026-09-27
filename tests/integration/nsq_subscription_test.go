@@ -18,23 +18,19 @@ import (
 )
 
 type subscriptionHandoff struct {
-	consumer  *driver.Consumer
-	producer  *driver.Producer
+	direct    *adapter.DirectHandoff
 	mu        sync.Mutex
 	publishes int
 }
 
-func (h *subscriptionHandoff) Ready(_ context.Context, address, _ string) error {
-	err := h.consumer.ConnectToNSQD(address)
-	if errors.Is(err, driver.ErrAlreadyConnected) {
-		return nil
-	}
-	return err
+func (h *subscriptionHandoff) Ready(ctx context.Context, address, topic string) error {
+	return h.direct.Ready(ctx, address, topic)
 }
 
-func (h *subscriptionHandoff) Publish(_ context.Context, _ string, topic string, body []byte) transport.Result {
-	if err := h.producer.Publish(topic, body); err != nil {
-		return transport.Result{Outcome: transport.Unknown}
+func (h *subscriptionHandoff) Publish(ctx context.Context, address, topic string, body []byte) transport.Result {
+	result := h.direct.Publish(ctx, address, topic, body)
+	if result.Outcome != transport.Confirmed {
+		return result
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -61,7 +57,25 @@ func TestNSQSubscriptionTerminalHandoffLostConfirmation(t *testing.T) {
 	cfg.ReadTimeout = 3 * time.Second
 	cfg.WriteTimeout = time.Second
 	cfg.MaxInFlight = 1
-	handoff := &subscriptionHandoff{}
+	failureConfig := *cfg
+	failureConfig.MaxAttempts = 0
+	failureConsumer, err := driver.NewConsumer(legacy.FailedHandoffTopic(topic, channel), legacy.FailedHandoffChannel, &failureConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureConsumer.SetLogger(nil, driver.LogLevelError)
+	directHandoff, err := adapter.NewDirectHandoff(failureConsumer, cfg, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer closeCancel()
+		if err := directHandoff.Close(closeCtx); err != nil {
+			t.Error(err)
+		}
+	}()
+	handoff := &subscriptionHandoff{direct: directHandoff}
 	var mu sync.Mutex
 	businessCalls := 0
 	failed := make(chan legacy.FailedHandoff, 4)
@@ -92,14 +106,7 @@ func TestNSQSubscriptionTerminalHandoffLostConfirmation(t *testing.T) {
 	}
 	producer.SetLogger(nil, driver.LogLevelError)
 	defer producer.Stop()
-	handoff.producer = producer
-	failureConsumer, err := driver.NewConsumer(s.FailureTopic(), s.FailureChannel(), s.ConsumerConfig(cfg))
-	if err != nil {
-		t.Fatal(err)
-	}
-	failureConsumer.SetLogger(nil, driver.LogLevelError)
 	failureConsumer.AddHandler(s.FailureHandler(ctx))
-	handoff.consumer = failureConsumer
 	if err := failureConsumer.ConnectToNSQD(address); err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +146,75 @@ func TestNSQSubscriptionTerminalHandoffLostConfirmation(t *testing.T) {
 	handoff.mu.Unlock()
 	if calls != 2 || publishes != 2 {
 		t.Fatalf("business re-executed after exhaustion or handoff lost: business=%d handoffs=%d", calls, publishes)
+	}
+}
+
+func TestNSQSubscriberOwnsConsumersAndTerminalHandoff(t *testing.T) {
+	address := os.Getenv("RM_TEST_NSQ_TCP")
+	if address == "" {
+		t.Fatal("isolated NSQ address required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	topic := fmt.Sprintf("rm-runtime-%d", time.Now().UnixNano())
+	cfg := driver.NewConfig()
+	cfg.HeartbeatInterval = time.Second
+	cfg.DialTimeout = time.Second
+	cfg.ReadTimeout = 3 * time.Second
+	cfg.WriteTimeout = time.Second
+	cfg.MaxInFlight = 1
+	subscriber, err := adapter.NewSubscriber(adapter.SubscriberConfig{
+		NSQDAddresses: []string{address}, Driver: cfg, MaxInFlight: 1,
+		MaxAttempts: 1, Retry: adapter.Backoff{BaseDelay: 50 * time.Millisecond, MaxDelay: time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := make(chan legacy.FailedHandoff, 1)
+	setupCtx, stopSetup := context.WithTimeout(ctx, 5*time.Second)
+	if err := subscriber.Subscribe(setupCtx, topic, "business", func(deliveryCtx context.Context, delivery transport.Delivery) error {
+		if err := deliveryCtx.Err(); err != nil {
+			return fmt.Errorf("registration timeout leaked into delivery: %w", err)
+		}
+		if delivery.Message().ID != "runtime-uuid" {
+			return errors.New("application identity changed")
+		}
+		return errors.New("expected business failure")
+	}, func(_ context.Context, record legacy.FailedHandoff) error {
+		failed <- record
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stopSetup() // registration context is not the delivery lifetime
+	producer, err := driver.NewProducer(address, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer.SetLogger(nil, driver.LogLevelError)
+	defer producer.Stop()
+	body, err := legacy.Encode(legacy.Envelope{UUID: "runtime-uuid", Payload: []byte("event")}, legacy.Revision2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := producer.Publish(topic, body); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case record := <-failed:
+		if record.UUID != "runtime-uuid" || record.TransportMessageID == "" || record.Cause != "expected business failure" {
+			t.Fatalf("runtime handoff lost evidence: %+v", record)
+		}
+	case <-ctx.Done():
+		t.Fatal("runtime handoff missing: ", ctx.Err())
+	}
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer closeCancel()
+	if err := subscriber.Close(closeCtx); err != nil {
+		t.Fatal(err)
+	}
+	if err := subscriber.Subscribe(ctx, topic, "another", func(context.Context, transport.Delivery) error { return nil }, func(context.Context, legacy.FailedHandoff) error { return nil }); err == nil {
+		t.Fatal("closed subscriber accepted a new subscription")
 	}
 }
 

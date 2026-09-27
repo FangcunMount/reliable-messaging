@@ -46,6 +46,9 @@ type Subscription struct {
 	failureTopic string
 	mu           sync.Mutex
 	causes       map[string]error
+	activeMu     sync.Mutex
+	active       int
+	idle         chan struct{}
 }
 
 func NewSubscription(config SubscriptionConfig) (*Subscription, error) {
@@ -65,7 +68,9 @@ func NewSubscription(config SubscriptionConfig) (*Subscription, error) {
 	if config.FailedHandoffGroup != "" {
 		topic = legacy.FailedHandoffTopicForGroup(config.Topic, config.FailedHandoffGroup)
 	}
-	return &Subscription{config: config, failureTopic: topic, causes: make(map[string]error)}, nil
+	idle := make(chan struct{})
+	close(idle)
+	return &Subscription{config: config, failureTopic: topic, causes: make(map[string]error), idle: idle}, nil
 }
 
 func (s *Subscription) FailureTopic() string   { return s.failureTopic }
@@ -95,6 +100,8 @@ func (s *Subscription) HandleBusiness(ctx context.Context, raw *driver.Message) 
 	if raw == nil {
 		return errors.New("nil NSQ business delivery")
 	}
+	s.enter()
+	defer s.leave()
 	raw.DisableAutoResponse()
 	physicalID := string(raw.ID[:])
 	decoded, recognized, decodeErr := legacy.Decode(raw.Body)
@@ -145,6 +152,8 @@ func (s *Subscription) HandleFailure(ctx context.Context, raw *driver.Message) e
 	if raw == nil {
 		return errors.New("nil NSQ failed delivery")
 	}
+	s.enter()
+	defer s.leave()
 	raw.DisableAutoResponse()
 	failed, err := legacy.DecodeFailedHandoff(raw.Body)
 	if err != nil {
@@ -217,6 +226,37 @@ func (s *Subscription) forget(key string) {
 	s.mu.Lock()
 	delete(s.causes, key)
 	s.mu.Unlock()
+}
+
+func (s *Subscription) enter() {
+	s.activeMu.Lock()
+	if s.active == 0 {
+		s.idle = make(chan struct{})
+	}
+	s.active++
+	s.activeMu.Unlock()
+}
+
+func (s *Subscription) leave() {
+	s.activeMu.Lock()
+	s.active--
+	if s.active == 0 {
+		close(s.idle)
+	}
+	s.activeMu.Unlock()
+}
+
+// WaitIdle is safe after both attached consumers have stopped admission.
+func (s *Subscription) WaitIdle(ctx context.Context) error {
+	s.activeMu.Lock()
+	idle := s.idle
+	s.activeMu.Unlock()
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Subscription) retryDelay(attempt int, id string) time.Duration {
