@@ -1,0 +1,1 @@
+{"type":"component-base.messaging.message.v1","schema_revision":2,"uuid":"550e8400-e29b-41d4-a716-446655440000","metadata":{"event_type":"policy.changed","source":"iam-outbox-relay","trace_id":"contract-fixture"},"payload":"eyJldmVudF90eXBlIjoicG9saWN5LmNoYW5nZWQiLCJzdWJqZWN0Ijoi6Z2S5bKb5bqXIn0=","checksum":"6ff278b54bbddc410d87c52772305bd5feccc86e89b532692c875271c4a0c383"}
