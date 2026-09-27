@@ -273,6 +273,14 @@ func runMongo(ctx context.Context, client *driver.Client, phase string) error {
 		return mongoRelayRun(ctx, client)
 	case "mongo-relay-parallel-verify":
 		return mongoRelayVerify(ctx, client)
+	case "mongo-lost-ack-seed":
+		return mongoLostAckSeed(ctx, client)
+	case "mongo-lost-ack-old":
+		return mongoLostAckOld(ctx, client)
+	case "mongo-lost-ack-new":
+		return mongoLostAckNew(ctx, client)
+	case "mongo-lost-ack-verify":
+		return mongoLostAckVerify(ctx, client)
 	default:
 		return fmt.Errorf("unknown Mongo phase %q", phase)
 	}

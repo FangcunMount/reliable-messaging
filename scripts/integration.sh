@@ -117,6 +117,10 @@ if ((mysql_relay_old_status != 0 || mysql_relay_new_status != 0)); then
 fi
 cat "$build_dir/mysql-relay-old.log" "$build_dir/mysql-relay-new.log"
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new relay-parallel-verify
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new lost-ack-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-old lost-ack-old
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new lost-ack-new
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new lost-ack-verify
 handoff_mongo_uri='mongodb://mongo:27017/?replicaSet=rm-test'
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-seed
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-index
@@ -161,6 +165,10 @@ if ((mongo_relay_old_status != 0 || mongo_relay_new_status != 0)); then
 fi
 cat "$build_dir/mongo-relay-old.log" "$build_dir/mongo-relay-new.log"
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-relay-parallel-verify
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-lost-ack-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-old mongo-lost-ack-old
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-lost-ack-new
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-lost-ack-verify
 
 
 

@@ -260,6 +260,14 @@ func run(ctx context.Context, db *sql.DB, phase string) error {
 		return mysqlRelayRun(ctx, db)
 	case "relay-parallel-verify":
 		return mysqlRelayVerify(ctx, db)
+	case "lost-ack-seed":
+		return mysqlLostAckSeed(ctx, db)
+	case "lost-ack-old":
+		return mysqlLostAckOld(ctx, db)
+	case "lost-ack-new":
+		return mysqlLostAckNew(ctx, db)
+	case "lost-ack-verify":
+		return mysqlLostAckVerify(ctx, db)
 	default:
 		return fmt.Errorf("unknown phase %q", phase)
 	}

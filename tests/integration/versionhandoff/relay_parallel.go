@@ -160,6 +160,10 @@ func runParallelRelay(ctx context.Context, store outbox.Store, topic, label stri
 }
 
 func verifyNSQ(ctx context.Context, topic, id string) error {
+	return verifyNSQCount(ctx, topic, id, 1)
+}
+
+func verifyNSQCount(ctx context.Context, topic, id string, expected int) error {
 	if err := requireNSQ(); err != nil {
 		return err
 	}
@@ -194,7 +198,7 @@ func verifyNSQ(ctx context.Context, topic, id string) error {
 			continue
 		}
 		found = true
-		if current.MessageCount != 1 || len(current.Channels) != 1 || current.Channels[0].Name != nsqChannel || current.Channels[0].Depth != 1 {
+		if current.MessageCount != expected || len(current.Channels) != 1 || current.Channels[0].Name != nsqChannel || current.Channels[0].Depth != expected {
 			return fmt.Errorf("NSQ topic %s count=%d channels=%+v", topic, current.MessageCount, current.Channels)
 		}
 	}
@@ -211,7 +215,7 @@ func verifyNSQ(ctx context.Context, topic, id string) error {
 		return err
 	}
 	consumer.SetLogger(nil, driver.LogLevelError)
-	received := make(chan []byte, 2)
+	received := make(chan []byte, expected+1)
 	consumer.AddHandler(driver.HandlerFunc(func(m *driver.Message) error {
 		received <- append([]byte(nil), m.Body...)
 		return nil
@@ -221,13 +225,15 @@ func verifyNSQ(ctx context.Context, topic, id string) error {
 		return err
 	}
 	defer consumer.Stop()
-	select {
-	case body := <-received:
-		if string(body) != `{"message_id":"`+id+`"}` {
-			return fmt.Errorf("NSQ changed original payload %q", string(body))
+	for i := 0; i < expected; i++ {
+		select {
+		case body := <-received:
+			if string(body) != `{"message_id":"`+id+`"}` {
+				return fmt.Errorf("NSQ changed original payload %q", string(body))
+			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 	return nil
 }
