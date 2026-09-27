@@ -144,9 +144,22 @@ func TestNSQSubscriptionTerminalHandoffLostConfirmation(t *testing.T) {
 	mu.Lock()
 	calls := businessCalls
 	mu.Unlock()
-	handoff.mu.Lock()
-	publishes := handoff.publishes
-	handoff.mu.Unlock()
+	// The failure consumer may receive the second broker publish before the
+	// publishing goroutine has returned and updated this test probe.
+	var publishes int
+	for {
+		handoff.mu.Lock()
+		publishes = handoff.publishes
+		handoff.mu.Unlock()
+		if publishes >= 2 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("second handoff publish did not complete: business=%d handoffs=%d: %v", calls, publishes, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	if calls != 2 || publishes != 2 {
 		t.Fatalf("business re-executed after exhaustion or handoff lost: business=%d handoffs=%d", calls, publishes)
 	}
