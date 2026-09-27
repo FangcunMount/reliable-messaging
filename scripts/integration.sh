@@ -51,6 +51,125 @@ build_dir=$(mktemp -d "${TMPDIR:-/tmp}/$project-build.XXXXXX")
 "${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_sdk_test'
 "${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' -e RM_TEST_MONGO_URI='mongodb://mongo:27017/?replicaSet=rm-test' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/mysql-integration -test.v
 
+build_released_handoff() {
+  local tag=$1 expected=$2 label=$3 source_dir="$build_dir/handoff-$3"
+  if ! git -C "$repo" cat-file -e "refs/tags/$tag^{commit}" 2>/dev/null; then
+    git -C "$repo" fetch --no-tags --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
+  fi
+  [[ $(git -C "$repo" rev-parse "$tag^{commit}") == "$expected" ]] || {
+    echo "Released tag $tag did not resolve to the approved commit" >&2
+    exit 1
+  }
+  mkdir -p "$source_dir/versionhandoff"
+  git -C "$repo" archive "$tag" | tar -xf - -C "$source_dir"
+  cp "$repo/tests/integration/versionhandoff/"*.go "$source_dir/versionhandoff/"
+  (cd "$source_dir" && GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -o "$build_dir/handoff-$label.bin" ./versionhandoff)
+  "${compose[@]}" cp "$build_dir/handoff-$label.bin" "mysql:/tmp/handoff-$label"
+}
+
+# Build the same host scenario against two actual release tags. A current
+# Appender on a hand-edited old schema would not prove binary-version handoff.
+build_released_handoff v0.1.0 1cab5531ee985fff9561b94c9b3d396230f870d4 old
+build_released_handoff v0.2.1 5bbbacb15f9c044e7ef27d4384110a97b92c745f new
+"${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_sdk_version_handoff'
+handoff_dsn='root@tcp(127.0.0.1:3306)/rm_sdk_version_handoff?parseTime=true&loc=UTC'
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-before-ddl
+"${compose[@]}" exec -T mysql mysql -uroot rm_sdk_version_handoff -e 'ALTER TABLE rm_outbox ADD COLUMN failure_count BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER attempt_count, ADD COLUMN updated_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)) AFTER created_at'
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-after-ddl
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-drain
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-drain
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-retry-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-retry
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-retry-downgrade
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-retry-quarantine
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-lease-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-lease-recover
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new new-lease-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-old old-lease-recover
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new parallel-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_PARTICIPANT=old mysql /tmp/handoff-old parallel-claim > "$build_dir/mysql-parallel-old.log" 2>&1 &
+mysql_old_pid=$!
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_PARTICIPANT=new mysql /tmp/handoff-new parallel-claim > "$build_dir/mysql-parallel-new.log" 2>&1 &
+mysql_new_pid=$!
+mysql_old_status=0
+mysql_new_status=0
+wait "$mysql_old_pid" || mysql_old_status=$?
+wait "$mysql_new_pid" || mysql_new_status=$?
+if ((mysql_old_status != 0 || mysql_new_status != 0)); then
+  cat "$build_dir/mysql-parallel-old.log" "$build_dir/mysql-parallel-new.log" >&2
+  exit 1
+fi
+cat "$build_dir/mysql-parallel-old.log" "$build_dir/mysql-parallel-new.log"
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new parallel-verify
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new relay-parallel-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' -e RM_HANDOFF_PARTICIPANT=old mysql /tmp/handoff-old relay-parallel-run > "$build_dir/mysql-relay-old.log" 2>&1 &
+mysql_relay_old_pid=$!
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' -e RM_HANDOFF_PARTICIPANT=new mysql /tmp/handoff-new relay-parallel-run > "$build_dir/mysql-relay-new.log" 2>&1 &
+mysql_relay_new_pid=$!
+mysql_relay_old_status=0
+mysql_relay_new_status=0
+wait "$mysql_relay_old_pid" || mysql_relay_old_status=$?
+wait "$mysql_relay_new_pid" || mysql_relay_new_status=$?
+if ((mysql_relay_old_status != 0 || mysql_relay_new_status != 0)); then
+  cat "$build_dir/mysql-relay-old.log" "$build_dir/mysql-relay-new.log" >&2
+  exit 1
+fi
+cat "$build_dir/mysql-relay-old.log" "$build_dir/mysql-relay-new.log"
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new relay-parallel-verify
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new lost-ack-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-old lost-ack-old
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new lost-ack-new
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new lost-ack-verify
+handoff_mongo_uri='mongodb://mongo:27017/?replicaSet=rm-test'
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-index
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-after-index
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-drain
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-drain
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-retry-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-retry
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-retry-downgrade
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-retry-quarantine
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-lease-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-lease-recover
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-lease-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-lease-recover
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-parallel-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_PARTICIPANT=old mysql /tmp/handoff-old mongo-parallel-claim > "$build_dir/mongo-parallel-old.log" 2>&1 &
+mongo_old_pid=$!
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_PARTICIPANT=new mysql /tmp/handoff-new mongo-parallel-claim > "$build_dir/mongo-parallel-new.log" 2>&1 &
+mongo_new_pid=$!
+mongo_old_status=0
+mongo_new_status=0
+wait "$mongo_old_pid" || mongo_old_status=$?
+wait "$mongo_new_pid" || mongo_new_status=$?
+if ((mongo_old_status != 0 || mongo_new_status != 0)); then
+  cat "$build_dir/mongo-parallel-old.log" "$build_dir/mongo-parallel-new.log" >&2
+  exit 1
+fi
+cat "$build_dir/mongo-parallel-old.log" "$build_dir/mongo-parallel-new.log"
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-parallel-verify
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-relay-parallel-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' -e RM_HANDOFF_PARTICIPANT=old mysql /tmp/handoff-old mongo-relay-parallel-run > "$build_dir/mongo-relay-old.log" 2>&1 &
+mongo_relay_old_pid=$!
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' -e RM_HANDOFF_PARTICIPANT=new mysql /tmp/handoff-new mongo-relay-parallel-run > "$build_dir/mongo-relay-new.log" 2>&1 &
+mongo_relay_new_pid=$!
+mongo_relay_old_status=0
+mongo_relay_new_status=0
+wait "$mongo_relay_old_pid" || mongo_relay_old_status=$?
+wait "$mongo_relay_new_pid" || mongo_relay_new_status=$?
+if ((mongo_relay_old_status != 0 || mongo_relay_new_status != 0)); then
+  cat "$build_dir/mongo-relay-old.log" "$build_dir/mongo-relay-new.log" >&2
+  exit 1
+fi
+cat "$build_dir/mongo-relay-old.log" "$build_dir/mongo-relay-new.log"
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-relay-parallel-verify
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-lost-ack-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-old mongo-lost-ack-old
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-lost-ack-new
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-lost-ack-verify
+
 
 
 
