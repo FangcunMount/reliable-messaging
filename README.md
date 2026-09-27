@@ -17,7 +17,7 @@ make subscription-integration  # focused disposable NSQ consumer proof
 
 根目录单 module。只有实际需求出现时才创建适配器与公开包；当前 `tests/compatibility` 验证候选跨语言身份样例，`tests/architecture` 约束依赖边界。
 
-当前已实现消息身份、原事务追加、带凭证的状态转移、受监督投递接缝与传输发布适配；`wire/legacy` 候选封装现行 envelope 和失败中转格式。NSQ 消费候选已加入显式确认、有界失败中转、原 ID 保留、直接 nsqd／lookupd 订阅与 SDK 管理的失败中转生产者；完整 EventBus、服务持久审计接入和迁移尚未完成。租户审批、业务重试授权、消费幂等、宿主迁移和上线操作仍属于各服务。
+当前已实现消息身份、原事务追加、带凭证的状态转移、受监督投递接缝与传输发布适配；`wire/legacy` 候选封装现行 envelope 和失败中转格式。NSQ 候选增加原始编码字节的直接发布入口，以及显式确认、有界失败中转、原 ID 保留、直接 nsqd／lookupd 订阅与 SDK 管理的失败中转生产者；完整 EventBus、服务持久审计接入和迁移尚未完成。租户审批、业务重试授权、消费幂等、宿主迁移和上线操作仍属于各服务。
 
 ## 可靠性边界
 

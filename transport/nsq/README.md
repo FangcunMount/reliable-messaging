@@ -1,8 +1,8 @@
 # NSQ publisher lifecycle (provisional)
 
-The host constructs/configures a `go-nsq v1.1.0` Producer and lends it to `New`. Logical destinations map explicitly to physical topics; this adapter does not create subscriptions or change stored bytes. The constructor starts no work. Configure bounded driver dial/read/write timeouts.
+The host constructs/configures a `go-nsq v1.1.0` Producer and lends it to `New`. Outbox messages use copied logical-destination routes; direct events can call `PublishRaw` with an explicit NSQ topic and already encoded bytes, without declaring routes. Both paths use the same bounded sends and `Drain` lifecycle. This adapter does not create subscriptions or change stored bytes. The constructor starts no work. Configure bounded driver dial/read/write timeouts.
 
-`Publish` returns `Confirmed` only on a nil driver result. Missing/invalid local routes are `Rejected`; driver errors and context expiry are conservatively `Unknown`, because the broker may have received the message. NSQ acceptance does not prove consumer handling or synchronous disk durability. The adapter does not retry internally.
+`Publish` and `PublishRaw` return `Confirmed` only on a nil driver result. Missing/invalid local routes, invalid raw topics and empty raw bodies are `Rejected`; driver errors and context expiry are conservatively `Unknown`, because the broker may have received the message. For Unknown, the host retains the original application identity and wire bytes before any authorized retry. NSQ acceptance does not prove consumer handling or synchronous disk durability. The adapter does not retry internally.
 
 The pinned driver's Publish call has no context parameter. Each admitted call runs with one bounded in-flight slot; context expiry returns Unknown but retains that slot until the actual call finishes. Repeated timeouts therefore cannot create unlimited background sends. The host should choose a limit aligned with Relay concurrency and account for possible duplicates while an earlier unknown send is still in flight.
 

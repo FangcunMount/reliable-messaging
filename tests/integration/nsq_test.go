@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/FangcunMount/reliable-messaging/message"
 	"github.com/FangcunMount/reliable-messaging/transport"
 	adapter "github.com/FangcunMount/reliable-messaging/transport/nsq"
+	"github.com/FangcunMount/reliable-messaging/wire/legacy"
 	driver "github.com/nsqio/go-nsq"
 )
 
@@ -173,4 +175,72 @@ func TestNSQLostConfirmationPreservesWire(t *testing.T) {
 	}
 	// This proves duplicate physical delivery with preserved wire, not host
 	// consumer idempotency or fsync durability. Those have separate acceptance.
+}
+
+func TestNSQRawPublisherPreservesLegacyEnvelope(t *testing.T) {
+	address := os.Getenv("RM_TEST_NSQ_TCP")
+	if address == "" {
+		t.Fatal("isolated NSQ address required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	topic := fmt.Sprintf("rm-raw-publish-%d", time.Now().UnixNano())
+	cfg := driver.NewConfig()
+	cfg.DialTimeout = time.Second
+	cfg.ReadTimeout = 3 * time.Second
+	cfg.WriteTimeout = time.Second
+	cfg.HeartbeatInterval = time.Second
+	consumer, err := driver.NewConsumer(topic, "proof", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer.SetLogger(nil, driver.LogLevelError)
+	received := make(chan []byte, 1)
+	consumer.AddHandler(driver.HandlerFunc(func(raw *driver.Message) error {
+		received <- append([]byte(nil), raw.Body...)
+		return nil
+	}))
+	if err := consumer.ConnectToNSQD(address); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		consumer.Stop()
+		select {
+		case <-consumer.StopChan:
+		case <-time.After(5 * time.Second):
+			t.Error("raw proof consumer did not stop")
+		}
+	}()
+	producer, err := driver.NewProducer(address, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer.SetLogger(nil, driver.LogLevelError)
+	defer producer.Stop()
+	publisher, err := adapter.New(producer, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := legacy.Encode(legacy.Envelope{UUID: "direct-uuid", Metadata: map[string]string{"event_type": "direct.created"}, Payload: []byte(`{"value":1}`)}, legacy.Revision2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := publisher.PublishRaw(ctx, topic, body); result.Outcome != transport.Confirmed {
+		t.Fatalf("raw publish outcome=%d", result.Outcome)
+	}
+	select {
+	case wire := <-received:
+		if !bytes.Equal(wire, body) {
+			t.Fatal("raw legacy envelope changed on NSQ")
+		}
+		decoded, recognized, err := legacy.Decode(wire)
+		if err != nil || !recognized || decoded.UUID != "direct-uuid" || decoded.Metadata["event_type"] != "direct.created" {
+			t.Fatalf("raw envelope identity changed: %+v recognized=%v err=%v", decoded, recognized, err)
+		}
+	case <-ctx.Done():
+		t.Fatal("raw message missing: ", ctx.Err())
+	}
+	if err := publisher.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
