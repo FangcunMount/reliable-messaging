@@ -119,7 +119,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, channel string, handl
 	}
 	addresses := s.config.NSQDAddresses
 	if len(s.config.LookupdAddresses) > 0 {
-		resolved, err := resolveTopicProducers(ctx, s.config.LookupdAddresses, topic)
+		resolved, err := resolveBootstrapSources(ctx, s.config.LookupdAddresses, topic)
 		if err != nil {
 			return fmt.Errorf("resolve NSQD producers for %s: %w", topic, err)
 		}
@@ -152,6 +152,11 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, channel string, handl
 	businessConsumer.AddConcurrentHandlers(binding.BusinessHandler(s.config.DeliveryContext), s.config.MaxInFlight)
 	if err := failureConsumer.ConnectToNSQDs(addresses); err != nil {
 		return errors.Join(fmt.Errorf("connect failure consumer: %w", err), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
+	}
+	if len(s.config.LookupdAddresses) > 0 {
+		if err := failureConsumer.ConnectToNSQLookupds(s.config.LookupdAddresses); err != nil {
+			return errors.Join(fmt.Errorf("discover failure topic: %w", err), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
+		}
 	}
 	if err := s.connectBusiness(businessConsumer, addresses); err != nil {
 		return errors.Join(fmt.Errorf("connect business consumer: %w", err), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))

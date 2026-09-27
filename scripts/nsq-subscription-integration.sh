@@ -33,4 +33,4 @@ case "$architecture" in
 esac
 (cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/nsq-subscription-test" ./tests/integration)
 "${compose[@]}" cp "$build_dir/nsq-subscription-test" mysql:/tmp/nsq-subscription-test
-"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' -e RM_TEST_NSQ_LOOKUPD='nsqlookupd:4161' mysql /tmp/nsq-subscription-test -test.v -test.run '^TestNSQ(SubscriptionTerminalHandoffLostConfirmation|SubscriberOwnsConsumersAndTerminalHandoff|SubscriberLookupdTopology)$'
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' -e RM_TEST_NSQ_LOOKUPD='nsqlookupd:4161' mysql /tmp/nsq-subscription-test -test.v -test.run '^TestNSQ(SubscriptionTerminalHandoffLostConfirmation|SubscriberOwnsConsumersAndTerminalHandoff|SubscriberLookupdTopology|SubscriberBeforeTopicRegistration)$'

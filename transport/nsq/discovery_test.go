@@ -53,3 +53,38 @@ func TestResolveTopicProducersKeepsHealthyLookupdWhenPeerFails(t *testing.T) {
 		t.Fatalf("healthy lookupd producers lost: %v", addresses)
 	}
 }
+
+func TestResolveBootstrapSourcesUsesOneActiveNodeBeforeTopicExists(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/lookup":
+			w.WriteHeader(http.StatusNotFound)
+		case "/nodes":
+			_, _ = w.Write([]byte(`{"producers":[{"broadcast_address":"nsqd-b","tcp_port":4150},{"broadcast_address":"nsqd-a","tcp_port":4150}]}`))
+		default:
+			t.Errorf("unexpected lookupd path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	addresses, err := resolveBootstrapSources(context.Background(), []string{server.URL}, "new.topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(addresses, []string{"nsqd-a:4150"}) {
+		t.Fatalf("bootstrap addresses = %v", addresses)
+	}
+}
+
+func TestResolveBootstrapSourcesFailsWithoutAnyNSQD(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/lookup" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"producers":[]}`))
+	}))
+	defer server.Close()
+	if _, err := resolveBootstrapSources(context.Background(), []string{server.URL}, "new.topic"); err == nil {
+		t.Fatal("missing NSQD bootstrap node accepted")
+	}
+}

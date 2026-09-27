@@ -223,11 +223,8 @@ func TestNSQSubscriberOwnsConsumersAndTerminalHandoff(t *testing.T) {
 
 func TestNSQSubscriberLookupdTopology(t *testing.T) {
 	address, lookupd, nsqdHTTP := os.Getenv("RM_TEST_NSQ_TCP"), os.Getenv("RM_TEST_NSQ_LOOKUPD"), os.Getenv("RM_TEST_NSQ_HTTP")
-	if lookupd == "" {
-		t.Skip("lookupd fixture is provided by make subscription-integration")
-	}
-	if address == "" || nsqdHTTP == "" {
-		t.Fatal("isolated NSQ addresses required")
+	if address == "" || lookupd == "" || nsqdHTTP == "" {
+		t.Fatal("isolated NSQ and lookupd addresses required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -309,6 +306,149 @@ func TestNSQSubscriberLookupdTopology(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("lookupd handoff missing: ", ctx.Err())
+	}
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer closeCancel()
+	if err := subscriber.Close(closeCtx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNSQSubscriberBeforeTopicRegistration(t *testing.T) {
+	address, lookupd, nsqdHTTP := os.Getenv("RM_TEST_NSQ_TCP"), os.Getenv("RM_TEST_NSQ_LOOKUPD"), os.Getenv("RM_TEST_NSQ_HTTP")
+	if address == "" || lookupd == "" || nsqdHTTP == "" {
+		t.Fatal("isolated NSQ and lookupd addresses required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	client := &http.Client{Timeout: 2 * time.Second}
+	topic := fmt.Sprintf("rm-late-topic-%d", time.Now().UnixNano())
+	for {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+lookupd+"/nodes", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := client.Do(request)
+		if err == nil {
+			var found struct {
+				Producers []json.RawMessage `json:"producers"`
+			}
+			decodeErr := json.NewDecoder(response.Body).Decode(&found)
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK && decodeErr == nil && len(found.Producers) > 0 {
+				break
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("lookupd did not register any nsqd: ", ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+lookupd+"/lookup?topic="+url.QueryEscape(topic), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("late topic already exists in lookupd: %s", response.Status)
+	}
+	cfg := driver.NewConfig()
+	cfg.HeartbeatInterval = time.Second
+	cfg.DialTimeout = time.Second
+	cfg.ReadTimeout = 3 * time.Second
+	cfg.WriteTimeout = time.Second
+	cfg.LookupdPollInterval = 100 * time.Millisecond
+	cfg.LookupdPollJitter = 0
+	subscriber, err := adapter.NewSubscriber(adapter.SubscriberConfig{
+		LookupdAddresses: []string{lookupd}, Driver: cfg, MaxInFlight: 1,
+		MaxAttempts: 1, Retry: adapter.Backoff{BaseDelay: 50 * time.Millisecond, MaxDelay: time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := make(chan legacy.FailedHandoff, 1)
+	if err := subscriber.Subscribe(ctx, topic, "business", func(context.Context, transport.Delivery) error {
+		return errors.New("late topic failure")
+	}, func(_ context.Context, record legacy.FailedHandoff) error {
+		failed <- record
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request, err = http.NewRequestWithContext(ctx, http.MethodPost, nsqdHTTP+"/topic/create?topic="+url.QueryEscape(topic), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err = client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("create late topic status %s", response.Status)
+	}
+	for {
+		request, err = http.NewRequestWithContext(ctx, http.MethodGet, nsqdHTTP+"/stats?format=json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err = client.Do(request)
+		if err == nil {
+			var stats struct {
+				Topics []struct {
+					Name     string `json:"topic_name"`
+					Channels []struct {
+						Name    string            `json:"channel_name"`
+						Clients []json.RawMessage `json:"clients"`
+					} `json:"channels"`
+				} `json:"topics"`
+			}
+			decodeErr := json.NewDecoder(response.Body).Decode(&stats)
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK && decodeErr == nil {
+				for _, current := range stats.Topics {
+					if current.Name == topic {
+						for _, channel := range current.Channels {
+							if channel.Name == "business" && len(channel.Clients) > 0 {
+								goto connected
+							}
+						}
+					}
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("business consumer did not discover late topic: ", ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+connected:
+	producer, err := driver.NewProducer(address, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer.SetLogger(nil, driver.LogLevelError)
+	defer producer.Stop()
+	body, err := legacy.Encode(legacy.Envelope{UUID: "late-topic-uuid", Payload: []byte("event")}, legacy.Revision2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := producer.Publish(topic, body); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case record := <-failed:
+		if record.UUID != "late-topic-uuid" || record.TransportMessageID == "" || record.Cause != "late topic failure" {
+			t.Fatalf("late topic handoff lost evidence: %+v", record)
+		}
+	case <-ctx.Done():
+		t.Fatal("late topic handoff missing: ", ctx.Err())
 	}
 	closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer closeCancel()
