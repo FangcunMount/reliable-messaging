@@ -267,6 +267,12 @@ func runMongo(ctx context.Context, client *driver.Client, phase string) error {
 		return mongoParallelClaim(ctx, client)
 	case "mongo-parallel-verify":
 		return mongoParallelVerify(ctx, client)
+	case "mongo-relay-parallel-seed":
+		return mongoRelaySeed(ctx, client)
+	case "mongo-relay-parallel-run":
+		return mongoRelayRun(ctx, client)
+	case "mongo-relay-parallel-verify":
+		return mongoRelayVerify(ctx, client)
 	default:
 		return fmt.Errorf("unknown Mongo phase %q", phase)
 	}

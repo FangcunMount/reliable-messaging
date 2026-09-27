@@ -102,6 +102,21 @@ if ((mysql_old_status != 0 || mysql_new_status != 0)); then
 fi
 cat "$build_dir/mysql-parallel-old.log" "$build_dir/mysql-parallel-new.log"
 "${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" mysql /tmp/handoff-new parallel-verify
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new relay-parallel-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' -e RM_HANDOFF_PARTICIPANT=old mysql /tmp/handoff-old relay-parallel-run > "$build_dir/mysql-relay-old.log" 2>&1 &
+mysql_relay_old_pid=$!
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' -e RM_HANDOFF_PARTICIPANT=new mysql /tmp/handoff-new relay-parallel-run > "$build_dir/mysql-relay-new.log" 2>&1 &
+mysql_relay_new_pid=$!
+mysql_relay_old_status=0
+mysql_relay_new_status=0
+wait "$mysql_relay_old_pid" || mysql_relay_old_status=$?
+wait "$mysql_relay_new_pid" || mysql_relay_new_status=$?
+if ((mysql_relay_old_status != 0 || mysql_relay_new_status != 0)); then
+  cat "$build_dir/mysql-relay-old.log" "$build_dir/mysql-relay-new.log" >&2
+  exit 1
+fi
+cat "$build_dir/mysql-relay-old.log" "$build_dir/mysql-relay-new.log"
+"${compose[@]}" exec -T -e RM_HANDOFF_MYSQL_DSN="$handoff_dsn" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new relay-parallel-verify
 handoff_mongo_uri='mongodb://mongo:27017/?replicaSet=rm-test'
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-old mongo-old-seed
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-new-index
@@ -131,6 +146,21 @@ if ((mongo_old_status != 0 || mongo_new_status != 0)); then
 fi
 cat "$build_dir/mongo-parallel-old.log" "$build_dir/mongo-parallel-new.log"
 "${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" mysql /tmp/handoff-new mongo-parallel-verify
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-relay-parallel-seed
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' -e RM_HANDOFF_PARTICIPANT=old mysql /tmp/handoff-old mongo-relay-parallel-run > "$build_dir/mongo-relay-old.log" 2>&1 &
+mongo_relay_old_pid=$!
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' -e RM_HANDOFF_PARTICIPANT=new mysql /tmp/handoff-new mongo-relay-parallel-run > "$build_dir/mongo-relay-new.log" 2>&1 &
+mongo_relay_new_pid=$!
+mongo_relay_old_status=0
+mongo_relay_new_status=0
+wait "$mongo_relay_old_pid" || mongo_relay_old_status=$?
+wait "$mongo_relay_new_pid" || mongo_relay_new_status=$?
+if ((mongo_relay_old_status != 0 || mongo_relay_new_status != 0)); then
+  cat "$build_dir/mongo-relay-old.log" "$build_dir/mongo-relay-new.log" >&2
+  exit 1
+fi
+cat "$build_dir/mongo-relay-old.log" "$build_dir/mongo-relay-new.log"
+"${compose[@]}" exec -T -e RM_HANDOFF_MONGO_URI="$handoff_mongo_uri" -e RM_HANDOFF_NSQ_TCP='nsqd:4150' -e RM_HANDOFF_NSQ_HTTP='http://nsqd:4151' mysql /tmp/handoff-new mongo-relay-parallel-verify
 
 
 

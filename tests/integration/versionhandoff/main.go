@@ -254,6 +254,12 @@ func run(ctx context.Context, db *sql.DB, phase string) error {
 		return mysqlParallelClaim(ctx, db)
 	case "parallel-verify":
 		return mysqlParallelVerify(ctx, db)
+	case "relay-parallel-seed":
+		return mysqlRelaySeed(ctx, db)
+	case "relay-parallel-run":
+		return mysqlRelayRun(ctx, db)
+	case "relay-parallel-verify":
+		return mysqlRelayVerify(ctx, db)
 	default:
 		return fmt.Errorf("unknown phase %q", phase)
 	}
