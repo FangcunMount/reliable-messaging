@@ -19,6 +19,7 @@ type Publisher struct {
 	mu       sync.Mutex
 	active   int
 	stopping bool
+	stopCh   chan struct{}
 	drained  chan struct{}
 }
 
@@ -43,7 +44,7 @@ func newPublisher(producer sender, routes map[string]string, maxInFlight int) (*
 		}
 		copied[destination] = topic
 	}
-	return &Publisher{producer: producer, routes: copied, slots: make(chan struct{}, maxInFlight), drained: make(chan struct{})}, nil
+	return &Publisher{producer: producer, routes: copied, slots: make(chan struct{}, maxInFlight), stopCh: make(chan struct{}), drained: make(chan struct{})}, nil
 }
 
 // Publish retains its in-flight slot until the real driver call finishes, even
@@ -74,6 +75,8 @@ func (p *Publisher) publishBytes(ctx context.Context, topic string, body []byte)
 	}
 	select {
 	case p.slots <- struct{}{}:
+	case <-p.stopCh:
+		return transport.Result{Outcome: transport.Unknown}
 	case <-ctx.Done():
 		return transport.Result{Outcome: transport.Unknown}
 	}
@@ -115,6 +118,7 @@ func (p *Publisher) Drain(ctx context.Context) error {
 	p.mu.Lock()
 	if !p.stopping {
 		p.stopping = true
+		close(p.stopCh)
 		if p.active == 0 {
 			close(p.drained)
 		}

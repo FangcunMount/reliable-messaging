@@ -47,11 +47,14 @@ build_dir=$(mktemp -d "${TMPDIR:-/tmp}/$project-build.XXXXXX")
 (cd "$repo" && go run ./examples/host-lifecycle)
 "${compose[@]}" exec -T mongo mongosh --quiet --file /dev/stdin < "$repo/tests/integration/mongo-smoke.js"
 (cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/mysql-integration" ./tests/integration)
+(cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/nsq-adapter-integration" ./transport/nsq)
 "${compose[@]}" cp "$build_dir/mysql-integration" mysql:/tmp/mysql-integration
+"${compose[@]}" cp "$build_dir/nsq-adapter-integration" mysql:/tmp/nsq-adapter-integration
 "${compose[@]}" cp nsqd:/usr/local/bin/nsqd "$build_dir/nsqd-peer"
 "${compose[@]}" cp "$build_dir/nsqd-peer" mysql:/tmp/nsqd-peer
 "${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_sdk_test'
 "${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_sdk_test?parseTime=true&loc=UTC' -e RM_TEST_MONGO_URI='mongodb://mongo:27017/?replicaSet=rm-test' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' -e RM_TEST_NSQ_LOOKUPD='nsqlookupd:4161' -e RM_TEST_NSQD_BINARY='/tmp/nsqd-peer' mysql /tmp/mysql-integration -test.v
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' mysql /tmp/nsq-adapter-integration -test.v -test.run '^Test(DirectHandoffRealDisconnectRetainsIdentityAndDrains|ManagedPublisherOwnsRealNSQConnection)$'
 
 build_released_handoff() {
   local tag=$1 expected=$2 label=$3 source_dir="$build_dir/handoff-$3"
