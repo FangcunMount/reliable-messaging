@@ -223,8 +223,11 @@ func TestNSQSubscriberOwnsConsumersAndTerminalHandoff(t *testing.T) {
 
 func TestNSQSubscriberLookupdTopology(t *testing.T) {
 	address, lookupd, nsqdHTTP := os.Getenv("RM_TEST_NSQ_TCP"), os.Getenv("RM_TEST_NSQ_LOOKUPD"), os.Getenv("RM_TEST_NSQ_HTTP")
-	if address == "" || lookupd == "" || nsqdHTTP == "" {
-		t.Fatal("isolated NSQ and lookupd addresses required")
+	if lookupd == "" {
+		t.Skip("lookupd fixture is provided by make subscription-integration")
+	}
+	if address == "" || nsqdHTTP == "" {
+		t.Fatal("isolated NSQ addresses required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
