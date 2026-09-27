@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/FangcunMount/reliable-messaging/transport"
@@ -41,7 +42,7 @@ type Subscriber struct {
 	mu         sync.Mutex
 	running    []*runningSubscription
 	identities map[string]struct{}
-	stopping   bool
+	stopping   atomic.Bool
 }
 
 func NewSubscriber(config SubscriberConfig) (*Subscriber, error) {
@@ -93,9 +94,14 @@ func NewSubscriber(config SubscriberConfig) (*Subscriber, error) {
 // connecting the business consumer. A failure to connect either side stops
 // both; the original business message remains on the broker.
 func (s *Subscriber) Subscribe(ctx context.Context, topic, channel string, handler transport.Handler, failed func(context.Context, legacy.FailedHandoff) error) error {
-	s.mu.Lock()
+	if s.stopping.Load() {
+		return errors.New("NSQ subscriber is stopping")
+	}
+	if err := lockWithContext(ctx, &s.mu); err != nil {
+		return err
+	}
 	defer s.mu.Unlock()
-	if s.stopping {
+	if s.stopping.Load() {
 		return errors.New("NSQ subscriber is stopping")
 	}
 	if ctx.Err() != nil {
@@ -161,6 +167,9 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, channel string, handl
 	if err := s.connectBusiness(businessConsumer, addresses); err != nil {
 		return errors.Join(fmt.Errorf("connect business consumer: %w", err), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
 	}
+	if s.stopping.Load() || ctx.Err() != nil {
+		return errors.Join(errors.New("NSQ subscriber stopped during registration"), ctx.Err(), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
+	}
 	s.running = append(s.running, &runningSubscription{
 		binding: binding, business: businessConsumer, failure: failureConsumer, handoff: handoff,
 	})
@@ -186,8 +195,10 @@ func cleanupPartial(business, failure *driver.Consumer, binding *Subscription, h
 // Close is retryable after a context timeout. The subscriber remains stopped
 // for new registrations; successful return proves all owned sends drained.
 func (s *Subscriber) Close(ctx context.Context) error {
-	s.mu.Lock()
-	s.stopping = true
+	s.stopping.Store(true)
+	if err := lockWithContext(ctx, &s.mu); err != nil {
+		return err
+	}
 	running := append([]*runningSubscription(nil), s.running...)
 	s.mu.Unlock()
 	for _, subscription := range running {
@@ -209,6 +220,24 @@ func (s *Subscriber) Close(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func lockWithContext(ctx context.Context, mu *sync.Mutex) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if mu.TryLock() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func waitConsumer(ctx context.Context, consumer *driver.Consumer) error {

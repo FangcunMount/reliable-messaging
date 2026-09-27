@@ -2,6 +2,8 @@ package nsq
 
 import (
 	"context"
+	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -28,6 +30,73 @@ func TestNewSubscriberCopiesConfigurationAndDisablesDriverCutoff(t *testing.T) {
 	}
 	if err := s.Subscribe(context.Background(), "topic", "channel", func(context.Context, transport.Delivery) error { return nil }, func(context.Context, legacy.FailedHandoff) error { return nil }); err == nil {
 		t.Fatal("closed subscriber accepted registration")
+	}
+}
+
+func TestSubscriberCloseDeadlineDuringStalledRegistration(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		close(accepted)
+		<-release
+		conn.Close()
+	}()
+	config := driver.NewConfig()
+	config.ReadTimeout = 2 * time.Second
+	config.WriteTimeout = 2 * time.Second
+	config.DialTimeout = time.Second
+	config.HeartbeatInterval = time.Second
+	s, err := NewSubscriber(SubscriberConfig{
+		NSQDAddresses: []string{listener.Addr().String()}, Driver: config, MaxAttempts: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscribed := make(chan error, 1)
+	go func() {
+		subscribed <- s.Subscribe(context.Background(), "slow-topic", "slow-channel",
+			func(context.Context, transport.Delivery) error { return nil },
+			func(context.Context, legacy.FailedHandoff) error { return nil })
+	}()
+	select {
+	case <-accepted:
+	case err := <-subscribed:
+		close(release)
+		t.Fatalf("registration failed before connecting: %v", err)
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("subscriber did not start the blocked NSQ connection")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close(ctx) }()
+	select {
+	case err := <-closed:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Close during stalled registration = %v, want deadline", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		close(release)
+		<-subscribed
+		<-closed
+		t.Fatal("Close ignored its deadline while Subscribe held the lock")
+	}
+	close(release)
+	if err := <-subscribed; err == nil {
+		t.Fatal("registration completed after Close stopped admission")
+	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
