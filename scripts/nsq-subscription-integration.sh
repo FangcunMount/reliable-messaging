@@ -32,9 +32,12 @@ case "$architecture" in
   *) echo "Unsupported architecture: $architecture" >&2; exit 1 ;;
 esac
 (cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/nsq-subscription-test" ./tests/integration)
+(cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/nsq-handoff-test" ./transport/nsq)
 "${compose[@]}" cp "$build_dir/nsq-subscription-test" mysql:/tmp/nsq-subscription-test
+"${compose[@]}" cp "$build_dir/nsq-handoff-test" mysql:/tmp/nsq-handoff-test
 "${compose[@]}" cp nsqd:/usr/local/bin/nsqd "$build_dir/nsqd-peer"
 "${compose[@]}" cp "$build_dir/nsqd-peer" mysql:/tmp/nsqd-peer
 "${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_failure_audit_test'
 test_pattern=${RM_TEST_RUN:-'^TestNSQ(SubscriptionTerminalHandoffLostConfirmation|SubscriptionRequeuesAfterRealHandoffDisconnect|SubscriberOwnsConsumersAndTerminalHandoff|SubscriberLookupdTopology|SubscriberLookupdOutageWithConnectedBroker|SharedFailureGroupSurvivesEphemeralSubscriberReplacement|SubscriberBeforeTopicRegistration|SubscriberDurableFailureAudit|FailureAuditAcrossProcessRestart|RawPublisherPreservesLegacyEnvelope|ProvisionedFirstMessageBeforeConsumer|SubscriberLateNodeKillAndRejoin)$'}
 "${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_failure_audit_test?parseTime=true&loc=UTC' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' -e RM_TEST_NSQ_LOOKUPD='nsqlookupd:4161' -e RM_TEST_NSQD_BINARY='/tmp/nsqd-peer' mysql /tmp/nsq-subscription-test -test.v -test.run "$test_pattern"
+"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' mysql /tmp/nsq-handoff-test -test.v -test.run '^TestDirectHandoffRealDisconnectRetainsIdentityAndDrains$'
