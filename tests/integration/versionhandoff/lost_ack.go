@@ -271,7 +271,7 @@ func mongoLostAckVerify(ctx context.Context, client *mongoDriver.Client) error {
 		return err
 	}
 	if state.Name != "published" || state.Attempts != 2 || state.FailureCount != 0 {
-		return fmt.Errorf("Mongo recovered lost ACK state=%s attempts=%d failures=%d", state.Name, state.Attempts, state.FailureCount)
+		return fmt.Errorf("mongo recovered lost ACK state=%s attempts=%d failures=%d", state.Name, state.Attempts, state.FailureCount)
 	}
 	if err := verifyNSQCount(ctx, lostAckMongoTopic, lostAckMongoID, 2); err != nil {
 		return err
