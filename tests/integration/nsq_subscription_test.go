@@ -436,6 +436,112 @@ func TestNSQSubscriberLookupdOutageWithConnectedBroker(t *testing.T) {
 	}
 }
 
+// IAM's policy channel changes with each process ID. A stable failed-handoff
+// group must let the replacement subscriber audit a failure left by its peer.
+func TestNSQSharedFailureGroupSurvivesEphemeralSubscriberReplacement(t *testing.T) {
+	address, nsqdHTTP := os.Getenv("RM_TEST_NSQ_TCP"), os.Getenv("RM_TEST_NSQ_HTTP")
+	if address == "" || nsqdHTTP == "" {
+		t.Fatal("isolated NSQ addresses required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	topic := fmt.Sprintf("rm-shared-failure-%d", time.Now().UnixNano())
+	const group = "iam-policy-sync"
+	const oldChannel = "iam-instance-one#ephemeral"
+	const newChannel = "iam-instance-two#ephemeral"
+	cfg := driver.NewConfig()
+	cfg.HeartbeatInterval = time.Second
+	cfg.DialTimeout = time.Second
+	cfg.ReadTimeout = 3 * time.Second
+	cfg.WriteTimeout = time.Second
+	newSubscriber := func() *adapter.Subscriber {
+		t.Helper()
+		subscriber, err := adapter.NewSubscriber(adapter.SubscriberConfig{
+			NSQDAddresses: []string{address}, Driver: cfg, MaxInFlight: 1,
+			MaxAttempts: 1, FailedHandoffGroup: group,
+			Retry: adapter.Backoff{BaseDelay: 2 * time.Second, MaxDelay: 2 * time.Second},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			closeCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stop()
+			if err := subscriber.Close(closeCtx); err != nil {
+				t.Error(err)
+			}
+		})
+		return subscriber
+	}
+	first := newSubscriber()
+	firstSeen := make(chan legacy.FailedHandoff, 1)
+	if err := first.Subscribe(ctx, topic, oldChannel, func(context.Context, transport.Delivery) error {
+		return errors.New("policy reload failed")
+	}, func(_ context.Context, record legacy.FailedHandoff) error {
+		select {
+		case firstSeen <- record:
+		default:
+		}
+		return errors.New("IAM failure audit unavailable")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	waitForNSQChannelClient(t, ctx, client, nsqdHTTP, topic, oldChannel)
+	failureTopic := legacy.FailedHandoffTopicForGroup(topic, group)
+	waitForNSQChannelClient(t, ctx, client, nsqdHTTP, failureTopic, legacy.FailedHandoffChannel)
+	producer, err := driver.NewProducer(address, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer.SetLogger(nil, driver.LogLevelError)
+	defer producer.Stop()
+	body, err := legacy.Encode(legacy.Envelope{UUID: "original-policy-uuid", Payload: []byte("event")}, legacy.Revision2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := producer.Publish(topic, body); err != nil {
+		t.Fatal(err)
+	}
+	var firstRecord legacy.FailedHandoff
+	select {
+	case firstRecord = <-firstSeen:
+	case <-ctx.Done():
+		t.Fatal("first instance did not receive failed handoff: ", ctx.Err())
+	}
+	if firstRecord.UUID != "original-policy-uuid" || firstRecord.Channel != oldChannel || firstRecord.TransportMessageID == "" {
+		t.Fatalf("first handoff lost original identity: %+v", firstRecord)
+	}
+	closeCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+	if err := first.Close(closeCtx); err != nil {
+		stop()
+		t.Fatal(err)
+	}
+	stop()
+
+	second := newSubscriber()
+	secondSeen := make(chan legacy.FailedHandoff, 1)
+	if err := second.Subscribe(ctx, topic, newChannel, func(context.Context, transport.Delivery) error {
+		return nil
+	}, func(_ context.Context, record legacy.FailedHandoff) error {
+		select {
+		case secondSeen <- record:
+		default: // physical duplicates are allowed; host audit deduplicates
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case record := <-secondSeen:
+		if record.UUID != firstRecord.UUID || record.Topic != topic || record.Channel != oldChannel || record.TransportMessageID != firstRecord.TransportMessageID {
+			t.Fatalf("replacement instance lost original failure identity: first=%+v second=%+v", firstRecord, record)
+		}
+	case <-ctx.Done():
+		t.Fatal("replacement instance did not recover durable failed handoff: ", ctx.Err())
+	}
+}
+
 func TestNSQSubscriberBeforeTopicRegistration(t *testing.T) {
 	address, lookupd, nsqdHTTP := os.Getenv("RM_TEST_NSQ_TCP"), os.Getenv("RM_TEST_NSQ_LOOKUPD"), os.Getenv("RM_TEST_NSQ_HTTP")
 	if address == "" || lookupd == "" || nsqdHTTP == "" {
