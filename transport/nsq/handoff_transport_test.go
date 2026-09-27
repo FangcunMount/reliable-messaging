@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +15,17 @@ type fakeHandoffConsumer struct {
 	mu      sync.Mutex
 	address string
 	err     error
+}
+
+type stalledHandoffConsumer struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (c *stalledHandoffConsumer) ConnectToNSQD(string) error {
+	close(c.started)
+	<-c.release
+	return nil
 }
 
 func (c *fakeHandoffConsumer) ConnectToNSQD(address string) error {
@@ -31,6 +43,99 @@ type fakeHandoffProducer struct {
 	started chan struct{}
 	release chan struct{}
 	err     error
+}
+
+type stalledStopProducer struct {
+	fakeHandoffProducer
+	stopStarted chan struct{}
+	stopRelease chan struct{}
+}
+
+func (p *stalledStopProducer) Stop() {
+	close(p.stopStarted)
+	<-p.stopRelease
+	p.fakeHandoffProducer.Stop()
+}
+
+func TestDirectHandoffCloseDeadlineDuringStalledReady(t *testing.T) {
+	consumer := &stalledHandoffConsumer{started: make(chan struct{}), release: make(chan struct{})}
+	var created atomic.Int32
+	h, err := newDirectHandoff(consumer, func(string) (handoffProducer, error) {
+		created.Add(1)
+		return &fakeHandoffProducer{}, nil
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := make(chan error, 1)
+	go func() { ready <- h.Ready(context.Background(), "nsqd:4150", "cb.failed.test") }()
+	select {
+	case <-consumer.started:
+	case <-time.After(time.Second):
+		t.Fatal("handoff did not start connecting")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	closed := make(chan error, 1)
+	go func() { closed <- h.Close(ctx) }()
+	select {
+	case err := <-closed:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Close during stalled Ready = %v, want deadline", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		close(consumer.release)
+		<-ready
+		<-closed
+		t.Fatal("Close ignored its deadline while Ready held the lock")
+	}
+	if outcome := h.Publish(context.Background(), "nsqd:4150", "cb.failed.test", []byte("wire")); outcome.Outcome != transport.Unknown {
+		t.Fatalf("Publish after Close started = %v", outcome.Outcome)
+	}
+	close(consumer.release)
+	if err := <-ready; err == nil {
+		t.Fatal("Ready succeeded after Close stopped admission")
+	}
+	if created.Load() != 0 {
+		t.Fatal("closing handoff created a new producer")
+	}
+	if err := h.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDirectHandoffCloseDeadlineDuringProducerStop(t *testing.T) {
+	producer := &stalledStopProducer{stopStarted: make(chan struct{}), stopRelease: make(chan struct{})}
+	h, err := newDirectHandoff(&fakeHandoffConsumer{}, func(string) (handoffProducer, error) { return producer, nil }, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Ready(context.Background(), "nsqd:4150", "cb.failed.test"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	closed := make(chan error, 1)
+	go func() { closed <- h.Close(ctx) }()
+	select {
+	case <-producer.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("producer Stop was not started")
+	}
+	select {
+	case err := <-closed:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Close during producer Stop = %v, want deadline", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		close(producer.stopRelease)
+		<-closed
+		t.Fatal("Close ignored its deadline during producer Stop")
+	}
+	close(producer.stopRelease)
+	if err := h.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (p *fakeHandoffProducer) Publish(topic string, body []byte) error {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/FangcunMount/reliable-messaging/transport"
 	driver "github.com/nsqio/go-nsq"
@@ -28,9 +29,11 @@ type DirectHandoff struct {
 	topic       string
 	producers   map[string]handoffProducer
 	active      int
+	closing     atomic.Bool
 	stopping    bool
-	stopped     bool
 	drained     chan struct{}
+	stopOnce    sync.Once
+	stopDone    chan struct{}
 }
 
 func NewDirectHandoff(consumer *driver.Consumer, config *driver.Config, maxInFlight int) (*DirectHandoff, error) {
@@ -53,7 +56,7 @@ func newDirectHandoff(consumer handoffConsumer, factory func(string) (handoffPro
 	}
 	return &DirectHandoff{
 		consumer: consumer, newProducer: factory, slots: make(chan struct{}, maxInFlight),
-		producers: make(map[string]handoffProducer), drained: make(chan struct{}),
+		producers: make(map[string]handoffProducer), drained: make(chan struct{}), stopDone: make(chan struct{}),
 	}, nil
 }
 
@@ -61,9 +64,14 @@ func (h *DirectHandoff) Ready(ctx context.Context, address, topic string) error 
 	if address == "" || !driver.IsValidTopicName(topic) || ctx.Err() != nil {
 		return errors.New("valid source NSQD, topic and live context required")
 	}
-	h.mu.Lock()
+	if h.closing.Load() {
+		return errors.New("NSQ failed handoff is closing")
+	}
+	if err := lockWithContext(ctx, &h.mu); err != nil {
+		return err
+	}
 	defer h.mu.Unlock()
-	if h.stopping {
+	if h.closing.Load() || h.stopping {
 		return errors.New("NSQ failed handoff is closing")
 	}
 	if h.topic != "" && h.topic != topic {
@@ -72,6 +80,9 @@ func (h *DirectHandoff) Ready(ctx context.Context, address, topic string) error 
 	if err := h.consumer.ConnectToNSQD(address); err != nil && !errors.Is(err, driver.ErrAlreadyConnected) {
 		return fmt.Errorf("connect failure consumer to source NSQD: %w", err)
 	}
+	if h.closing.Load() || ctx.Err() != nil {
+		return errors.Join(errors.New("NSQ failed handoff closed during connection"), ctx.Err())
+	}
 	if h.producers[address] == nil {
 		producer, err := h.newProducer(address)
 		if err != nil {
@@ -79,13 +90,16 @@ func (h *DirectHandoff) Ready(ctx context.Context, address, topic string) error 
 		}
 		h.producers[address] = producer
 	}
+	if h.closing.Load() || ctx.Err() != nil {
+		return errors.Join(errors.New("NSQ failed handoff closed during producer setup"), ctx.Err())
+	}
 	h.topic = topic
 	return nil
 }
 
 func (h *DirectHandoff) Publish(ctx context.Context, address, topic string, body []byte) transport.Result {
 	unknown := transport.Result{Outcome: transport.Unknown}
-	if address == "" || !driver.IsValidTopicName(topic) || ctx.Err() != nil {
+	if address == "" || !driver.IsValidTopicName(topic) || ctx.Err() != nil || h.closing.Load() {
 		return unknown
 	}
 	select {
@@ -93,9 +107,12 @@ func (h *DirectHandoff) Publish(ctx context.Context, address, topic string, body
 	case <-ctx.Done():
 		return unknown
 	}
-	h.mu.Lock()
+	if err := lockWithContext(ctx, &h.mu); err != nil {
+		<-h.slots
+		return unknown
+	}
 	producer := h.producers[address]
-	if h.stopping || producer == nil || h.topic != topic || ctx.Err() != nil {
+	if h.closing.Load() || h.stopping || producer == nil || h.topic != topic || ctx.Err() != nil {
 		h.mu.Unlock()
 		<-h.slots
 		return unknown
@@ -130,7 +147,10 @@ func (h *DirectHandoff) Publish(ctx context.Context, address, topic string, body
 // producers. A timeout leaves ownership intact; a later Close may finish it.
 // The borrowed consumer is never stopped here.
 func (h *DirectHandoff) Close(ctx context.Context) error {
-	h.mu.Lock()
+	h.closing.Store(true)
+	if err := lockWithContext(ctx, &h.mu); err != nil {
+		return err
+	}
 	if !h.stopping {
 		h.stopping = true
 		if h.active == 0 {
@@ -138,19 +158,28 @@ func (h *DirectHandoff) Close(ctx context.Context) error {
 		}
 	}
 	drained := h.drained
+	producers := make([]handoffProducer, 0, len(h.producers))
+	for _, producer := range h.producers {
+		producers = append(producers, producer)
+	}
 	h.mu.Unlock()
 	select {
 	case <-drained:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if !h.stopped {
-		for _, producer := range h.producers {
-			producer.Stop()
-		}
-		h.stopped = true
+	h.stopOnce.Do(func() {
+		go func() {
+			for _, producer := range producers {
+				producer.Stop()
+			}
+			close(h.stopDone)
+		}()
+	})
+	select {
+	case <-h.stopDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return nil
 }
