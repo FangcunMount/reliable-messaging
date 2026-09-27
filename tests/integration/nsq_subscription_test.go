@@ -169,6 +169,171 @@ func TestNSQSubscriptionTerminalHandoffLostConfirmation(t *testing.T) {
 	}
 }
 
+type disconnectedHandoff struct {
+	address, topic string
+	first, next    *driver.Producer
+	mu             sync.Mutex
+	publishes      int
+}
+
+func (h *disconnectedHandoff) Ready(_ context.Context, address, topic string) error {
+	if address != h.address || topic != h.topic {
+		return fmt.Errorf("unexpected failure source %q topic %q", address, topic)
+	}
+	return nil // The test connects the failure consumer before business receipt.
+}
+
+func (h *disconnectedHandoff) Publish(_ context.Context, address, topic string, body []byte) transport.Result {
+	if address != h.address || topic != h.topic {
+		return transport.Result{Outcome: transport.Rejected}
+	}
+	h.mu.Lock()
+	h.publishes++
+	call := h.publishes
+	h.mu.Unlock()
+	producer := h.next
+	if call == 1 {
+		producer = h.first
+	}
+	if err := producer.Publish(topic, body); err != nil {
+		return transport.Result{Outcome: transport.Unknown}
+	}
+	return transport.Result{Outcome: transport.Confirmed}
+}
+
+func TestNSQSubscriptionRequeuesAfterRealHandoffDisconnect(t *testing.T) {
+	address := os.Getenv("RM_TEST_NSQ_TCP")
+	if address == "" {
+		t.Fatal("isolated NSQ address required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	topic := fmt.Sprintf("rm-handoff-disconnect-%d", time.Now().UnixNano())
+	const channel = "business"
+	failureTopic := legacy.FailedHandoffTopic(topic, channel)
+	cfg := driver.NewConfig()
+	cfg.HeartbeatInterval = time.Second
+	cfg.DialTimeout = time.Second
+	cfg.ReadTimeout = 3 * time.Second
+	cfg.WriteTimeout = time.Second
+	cfg.MaxInFlight = 1
+	cfg.MaxAttempts = 0
+	failureConsumer, err := driver.NewConsumer(failureTopic, legacy.FailedHandoffChannel, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureConsumer.SetLogger(nil, driver.LogLevelError)
+	proxyAddress, proxyDone, closeProxy := startDroppedNSQPublishAckProxy(t, address)
+	defer closeProxy()
+	first, err := driver.NewProducer(proxyAddress, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.SetLogger(nil, driver.LogLevelError)
+	defer first.Stop()
+	next, err := driver.NewProducer(address, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.SetLogger(nil, driver.LogLevelError)
+	defer next.Stop()
+	handoff := &disconnectedHandoff{address: address, topic: failureTopic, first: first, next: next}
+	failed := make(chan legacy.FailedHandoff, 2)
+	failureIDs := make(chan string, 2)
+	var businessCalls atomic.Int32
+	s, err := adapter.NewSubscription(adapter.SubscriptionConfig{
+		Topic: topic, Channel: channel, MaxAttempts: 1,
+		Retry: adapter.Backoff{BaseDelay: 50 * time.Millisecond, MaxDelay: 100 * time.Millisecond},
+		Handler: func(_ context.Context, delivery transport.Delivery) error {
+			businessCalls.Add(1)
+			if delivery.Message().ID != "same-application-uuid" {
+				return errors.New("application identity changed")
+			}
+			return errors.New("business failure")
+		},
+		FailedHandler: func(_ context.Context, record legacy.FailedHandoff) error {
+			failed <- record
+			return nil
+		},
+		Handoff: handoff,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureConsumer.AddHandler(driver.HandlerFunc(func(raw *driver.Message) error {
+		failureIDs <- string(raw.ID[:])
+		return s.HandleFailure(ctx, raw)
+	}))
+	if err := failureConsumer.ConnectToNSQD(address); err != nil {
+		t.Fatal(err)
+	}
+	defer stopNSQConsumer(t, failureConsumer)
+	businessConsumer, err := driver.NewConsumer(topic, channel, s.ConsumerConfig(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	businessConsumer.SetLogger(nil, driver.LogLevelError)
+	businessConsumer.AddHandler(s.BusinessHandler(ctx))
+	if err := businessConsumer.ConnectToNSQD(address); err != nil {
+		t.Fatal(err)
+	}
+	defer stopNSQConsumer(t, businessConsumer)
+	producer, err := driver.NewProducer(address, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer.SetLogger(nil, driver.LogLevelError)
+	defer producer.Stop()
+	body, err := legacy.Encode(legacy.Envelope{UUID: "same-application-uuid", Payload: []byte("original-payload")}, legacy.Revision2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := producer.Publish(topic, body); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-proxyDone:
+		if err != nil {
+			t.Fatalf("failure handoff was not accepted before disconnection: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("failure handoff did not reach broker: ", ctx.Err())
+	}
+	var sourceID string
+	seen := make(map[string]struct{}, 2)
+	for i := 0; i < 2; i++ {
+		select {
+		case record := <-failed:
+			if record.UUID != "same-application-uuid" || record.Topic != topic || record.Channel != channel ||
+				record.Cause != "business failure" || string(record.Payload) != "original-payload" || record.TransportMessageID == "" {
+				t.Fatalf("failure handoff changed identity, cause or payload: %+v", record)
+			}
+			if sourceID == "" {
+				sourceID = record.TransportMessageID
+			} else if record.TransportMessageID != sourceID {
+				t.Fatal("replayed failure changed the original NSQ physical ID")
+			}
+		case <-ctx.Done():
+			t.Fatal("missing duplicate failure handoff after network disconnect: ", ctx.Err())
+		}
+		select {
+		case id := <-failureIDs:
+			seen[id] = struct{}{}
+		case <-ctx.Done():
+			t.Fatal("missing physical handoff ID: ", ctx.Err())
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("expected two physical handoffs, got %d", len(seen))
+	}
+	handoff.mu.Lock()
+	publishes := handoff.publishes
+	handoff.mu.Unlock()
+	if publishes != 2 || businessCalls.Load() != 1 {
+		t.Fatalf("unexpected retry after lost handoff confirmation: publishes=%d business_calls=%d", publishes, businessCalls.Load())
+	}
+}
+
 func TestNSQSubscriberOwnsConsumersAndTerminalHandoff(t *testing.T) {
 	address := os.Getenv("RM_TEST_NSQ_TCP")
 	if address == "" {

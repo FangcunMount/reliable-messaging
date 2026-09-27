@@ -67,59 +67,9 @@ func TestNSQLostConfirmationPreservesWire(t *testing.T) {
 			t.Error("consumer did not stop")
 		}
 	}()
-	proxy, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer proxy.Close()
-	proxyDone := make(chan error, 1)
-	// The pinned driver always negotiates IDENTIFY features (JSON response).
-	// Drop the subsequent PUB OK frame after NSQ has accepted the raw bytes.
-	go func() {
-		downstream, err := proxy.Accept()
-		if err != nil {
-			proxyDone <- err
-			return
-		}
-		defer downstream.Close()
-		_ = downstream.SetDeadline(time.Now().Add(5 * time.Second))
-		upstream, err := net.DialTimeout("tcp", address, time.Second)
-		if err != nil {
-			proxyDone <- err
-			return
-		}
-		defer upstream.Close()
-		_ = upstream.SetDeadline(time.Now().Add(5 * time.Second))
-		copied := make(chan struct{})
-		go func() { defer close(copied); _, _ = io.Copy(upstream, downstream) }()
-		defer func() { downstream.Close(); upstream.Close(); <-copied }()
-		for {
-			var header [4]byte
-			if _, err = io.ReadFull(upstream, header[:]); err != nil {
-				proxyDone <- err
-				return
-			}
-			n := binary.BigEndian.Uint32(header[:])
-			if n < 4 || n > 1024*1024 {
-				proxyDone <- fmt.Errorf("unexpected frame %d", n)
-				return
-			}
-			frame := make([]byte, n)
-			if _, err = io.ReadFull(upstream, frame); err != nil {
-				proxyDone <- err
-				return
-			}
-			if binary.BigEndian.Uint32(frame[:4]) == 0 && string(frame[4:]) == "OK" {
-				proxyDone <- nil
-				return
-			}
-			if _, err = downstream.Write(append(header[:], frame...)); err != nil {
-				proxyDone <- err
-				return
-			}
-		}
-	}()
-	producer, err := driver.NewProducer(proxy.Addr().String(), cfg)
+	proxyAddress, proxyDone, closeProxy := startDroppedNSQPublishAckProxy(t, address)
+	defer closeProxy()
+	producer, err := driver.NewProducer(proxyAddress, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +125,66 @@ func TestNSQLostConfirmationPreservesWire(t *testing.T) {
 	}
 	// This proves duplicate physical delivery with preserved wire, not host
 	// consumer idempotency or fsync durability. Those have separate acceptance.
+}
+
+// startDroppedNSQPublishAckProxy forwards a real PUB to nsqd, then closes
+// without forwarding its OK frame. The broker may already have accepted the
+// message, while go-nsq must report the send as unconfirmed.
+func startDroppedNSQPublishAckProxy(t *testing.T, address string) (string, <-chan error, func()) {
+	t.Helper()
+	proxy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyDone := make(chan error, 1)
+	go func() {
+		defer proxy.Close()
+		downstream, err := proxy.Accept()
+		if err != nil {
+			proxyDone <- err
+			return
+		}
+		defer downstream.Close()
+		_ = downstream.SetDeadline(time.Now().Add(5 * time.Second))
+		upstream, err := net.DialTimeout("tcp", address, time.Second)
+		if err != nil {
+			proxyDone <- err
+			return
+		}
+		defer upstream.Close()
+		_ = upstream.SetDeadline(time.Now().Add(5 * time.Second))
+		copied := make(chan struct{})
+		go func() { defer close(copied); _, _ = io.Copy(upstream, downstream) }()
+		defer func() { downstream.Close(); upstream.Close(); <-copied }()
+		for {
+			var header [4]byte
+			if _, err = io.ReadFull(upstream, header[:]); err != nil {
+				proxyDone <- err
+				return
+			}
+			n := binary.BigEndian.Uint32(header[:])
+			if n < 4 || n > 1024*1024 {
+				proxyDone <- fmt.Errorf("unexpected frame %d", n)
+				return
+			}
+			frame := make([]byte, n)
+			if _, err = io.ReadFull(upstream, frame); err != nil {
+				proxyDone <- err
+				return
+			}
+			// The pinned driver negotiates IDENTIFY first; its JSON response is
+			// forwarded. Only the subsequent PUB OK is dropped.
+			if binary.BigEndian.Uint32(frame[:4]) == 0 && string(frame[4:]) == "OK" {
+				proxyDone <- nil
+				return
+			}
+			if _, err = downstream.Write(append(header[:], frame...)); err != nil {
+				proxyDone <- err
+				return
+			}
+		}
+	}()
+	return proxy.Addr().String(), proxyDone, func() { _ = proxy.Close() }
 }
 
 func TestNSQRawPublisherPreservesLegacyEnvelope(t *testing.T) {
