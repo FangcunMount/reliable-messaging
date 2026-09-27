@@ -33,4 +33,5 @@ case "$architecture" in
 esac
 (cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go test -c -tags=integration -o "$build_dir/nsq-subscription-test" ./tests/integration)
 "${compose[@]}" cp "$build_dir/nsq-subscription-test" mysql:/tmp/nsq-subscription-test
-"${compose[@]}" exec -T -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' -e RM_TEST_NSQ_LOOKUPD='nsqlookupd:4161' mysql /tmp/nsq-subscription-test -test.v -test.run '^TestNSQ(SubscriptionTerminalHandoffLostConfirmation|SubscriberOwnsConsumersAndTerminalHandoff|SubscriberLookupdTopology|SubscriberBeforeTopicRegistration)$'
+"${compose[@]}" exec -T mysql mysql -uroot -e 'CREATE DATABASE rm_failure_audit_test'
+"${compose[@]}" exec -T -e RM_TEST_MYSQL_DSN='root@tcp(127.0.0.1:3306)/rm_failure_audit_test?parseTime=true&loc=UTC' -e RM_TEST_NSQ_TCP='nsqd:4150' -e RM_TEST_NSQ_HTTP='http://nsqd:4151' -e RM_TEST_NSQ_LOOKUPD='nsqlookupd:4161' mysql /tmp/nsq-subscription-test -test.v -test.run '^TestNSQ(SubscriptionTerminalHandoffLostConfirmation|SubscriberOwnsConsumersAndTerminalHandoff|SubscriberLookupdTopology|SubscriberBeforeTopicRegistration|SubscriberDurableFailureAudit)$'
