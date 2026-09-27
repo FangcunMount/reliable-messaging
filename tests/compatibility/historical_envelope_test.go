@@ -143,4 +143,7 @@ func TestLegacyFailedHandoffMatchesReleasedNSQRecord(t *testing.T) {
 	if got := legacy.FailedHandoffTopic(input.Topic, input.Channel); got != "cb.failed.b6abe5a59ae6cb4454f2a271" {
 		t.Fatalf("active QS Worker handoff topic changed: %s", got)
 	}
+	if got := legacy.FailedHandoffTopicForGroup("iam.authz.version.v2", "qs-authz-sync-apiserver"); got != "cb.failed.5bbc2fd050986ad10b90cc51" {
+		t.Fatalf("shared authz handoff topic changed: %s", got)
+	}
 }
