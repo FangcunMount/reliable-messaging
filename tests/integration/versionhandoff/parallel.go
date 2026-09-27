@@ -90,8 +90,15 @@ func mysqlParallelClaim(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if claimed {
-		// Keep the lease live while the other released binary attempts its claim.
-		time.Sleep(2 * time.Second)
+		// The loser must finish ClaimDue before this winner can confirm. A
+		// fixed sleep would not prove that both versions overlapped on the lease.
+		if err := waitForBoth(ctx, func(ctx context.Context) (int64, error) {
+			var count int64
+			err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM handoff_barrier WHERE claimed IS NOT NULL").Scan(&count)
+			return count, err
+		}); err != nil {
+			return err
+		}
 		if err := s.Confirm(ctx, claims[0]); err != nil {
 			return err
 		}
@@ -160,7 +167,11 @@ func mongoParallelClaim(ctx context.Context, client *driver.Client) error {
 		return err
 	}
 	if claimed {
-		time.Sleep(2 * time.Second)
+		if err := waitForBoth(ctx, func(ctx context.Context) (int64, error) {
+			return barrier.CountDocuments(ctx, bson.M{"claimed": bson.M{"$exists": true}})
+		}); err != nil {
+			return err
+		}
 		if err := s.Confirm(ctx, claims[0]); err != nil {
 			return err
 		}
