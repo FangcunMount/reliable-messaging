@@ -157,18 +157,18 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, channel string, handl
 	failureConsumer.AddConcurrentHandlers(binding.FailureHandler(s.config.DeliveryContext), s.config.MaxInFlight)
 	businessConsumer.AddConcurrentHandlers(binding.BusinessHandler(s.config.DeliveryContext), s.config.MaxInFlight)
 	if err := failureConsumer.ConnectToNSQDs(addresses); err != nil {
-		return errors.Join(fmt.Errorf("connect failure consumer: %w", err), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
+		return errors.Join(fmt.Errorf("connect failure consumer: %w", err), s.cleanupPartial(ctx, identity, businessConsumer, failureConsumer, binding, handoff))
 	}
 	if len(s.config.LookupdAddresses) > 0 {
 		if err := failureConsumer.ConnectToNSQLookupds(s.config.LookupdAddresses); err != nil {
-			return errors.Join(fmt.Errorf("discover failure topic: %w", err), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
+			return errors.Join(fmt.Errorf("discover failure topic: %w", err), s.cleanupPartial(ctx, identity, businessConsumer, failureConsumer, binding, handoff))
 		}
 	}
 	if err := s.connectBusiness(businessConsumer, addresses); err != nil {
-		return errors.Join(fmt.Errorf("connect business consumer: %w", err), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
+		return errors.Join(fmt.Errorf("connect business consumer: %w", err), s.cleanupPartial(ctx, identity, businessConsumer, failureConsumer, binding, handoff))
 	}
 	if s.stopping.Load() || ctx.Err() != nil {
-		return errors.Join(errors.New("NSQ subscriber stopped during registration"), ctx.Err(), cleanupPartial(businessConsumer, failureConsumer, binding, handoff))
+		return errors.Join(errors.New("NSQ subscriber stopped during registration"), ctx.Err(), s.cleanupPartial(ctx, identity, businessConsumer, failureConsumer, binding, handoff))
 	}
 	s.running = append(s.running, &runningSubscription{
 		binding: binding, business: businessConsumer, failure: failureConsumer, handoff: handoff,
@@ -184,10 +184,27 @@ func (s *Subscriber) connectBusiness(consumer *driver.Consumer, addresses []stri
 	return consumer.ConnectToNSQDs(addresses)
 }
 
-func cleanupPartial(business, failure *driver.Consumer, binding *Subscription, handoff *DirectHandoff) error {
+// A failed registration may already have connected consumers or active failure
+// handlers. If its bounded cleanup cannot prove they stopped, retain ownership
+// so a later Close can finish the drain rather than falsely report success.
+func (s *Subscriber) cleanupPartial(ctx context.Context, identity string, business, failure *driver.Consumer, binding *Subscription, handoff *DirectHandoff) error {
+	err := cleanupPartial(ctx, business, failure, binding, handoff)
+	if err != nil {
+		s.running = append(s.running, &runningSubscription{
+			binding: binding, business: business, failure: failure, handoff: handoff,
+		})
+		s.identities[identity] = struct{}{}
+	}
+	return err
+}
+
+func cleanupPartial(ctx context.Context, business, failure *driver.Consumer, binding *Subscription, handoff *DirectHandoff) error {
 	business.Stop()
 	failure.Stop()
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
 	return errors.Join(waitConsumer(ctx, business), waitConsumer(ctx, failure), binding.WaitIdle(ctx), handoff.Close(ctx))
 }

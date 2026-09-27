@@ -62,8 +62,10 @@ func TestSubscriberCloseDeadlineDuringStalledRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	subscribed := make(chan error, 1)
+	subscribeCtx, cancelSubscribe := context.WithCancel(context.Background())
+	defer cancelSubscribe()
 	go func() {
-		subscribed <- s.Subscribe(context.Background(), "slow-topic", "slow-channel",
+		subscribed <- s.Subscribe(subscribeCtx, "slow-topic", "slow-channel",
 			func(context.Context, transport.Delivery) error { return nil },
 			func(context.Context, legacy.FailedHandoff) error { return nil })
 	}()
@@ -91,9 +93,15 @@ func TestSubscriberCloseDeadlineDuringStalledRegistration(t *testing.T) {
 		<-closed
 		t.Fatal("Close ignored its deadline while Subscribe held the lock")
 	}
+	// Cancelling registration also expires its cleanup budget. The stopped
+	// consumers must remain owned until a later Close verifies their drain.
+	cancelSubscribe()
 	close(release)
 	if err := <-subscribed; err == nil {
 		t.Fatal("registration completed after Close stopped admission")
+	}
+	if len(s.running) != 1 {
+		t.Fatalf("incomplete registration cleanup lost ownership: %d", len(s.running))
 	}
 	if err := s.Close(context.Background()); err != nil {
 		t.Fatal(err)
