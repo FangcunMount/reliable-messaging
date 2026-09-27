@@ -13,6 +13,7 @@ import (
 
 type managedProducerFixture struct {
 	publish func(string, []byte) error
+	stop    func()
 	stops   atomic.Int32
 }
 
@@ -20,7 +21,12 @@ func (p *managedProducerFixture) Publish(topic string, body []byte) error {
 	return p.publish(topic, body)
 }
 func (p *managedProducerFixture) Ping() error { return nil }
-func (p *managedProducerFixture) Stop()       { p.stops.Add(1) }
+func (p *managedProducerFixture) Stop() {
+	if p.stop != nil {
+		p.stop()
+	}
+	p.stops.Add(1)
+}
 
 func TestManagedPublisherRetainsProducerUntilRealSendDrains(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -76,5 +82,44 @@ func TestManagedPublisherRejectsInvalidConfigBeforeConnecting(t *testing.T) {
 	}
 	if producer.stops.Load() != 0 {
 		t.Fatal("failed internal construction took ownership of borrowed test producer")
+	}
+}
+
+func TestManagedPublisherInterruptsOnlyAfterGracefulCloseTimesOut(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	producer := &managedProducerFixture{
+		publish: func(string, []byte) error {
+			close(entered)
+			<-release
+			return errors.New("driver stopped before confirmation")
+		},
+		stop: func() { close(release) },
+	}
+	managed, err := newManagedPublisher(producer, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := make(chan transport.Result, 1)
+	go func() { published <- managed.PublishRaw(context.Background(), "events", []byte("same-original-id")) }()
+	<-entered
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	if err := managed.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("graceful close before driver stopped = %v", err)
+	}
+	cancel()
+	if producer.stops.Load() != 0 {
+		t.Fatal("graceful close interrupted an unconfirmed send")
+	}
+	managed.Interrupt()
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := managed.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := (<-published).Outcome; got != transport.Unknown {
+		t.Fatalf("interrupted publication = %v", got)
+	}
+	if producer.stops.Load() != 1 {
+		t.Fatalf("producer stopped %d times", producer.stops.Load())
 	}
 }

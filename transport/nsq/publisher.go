@@ -115,7 +115,18 @@ func (p *Publisher) publishBytes(ctx context.Context, topic string, body []byte)
 // Drain permanently stops new admission and waits for underlying driver calls.
 // It does not stop or close the host-owned producer. Concurrent calls are safe.
 func (p *Publisher) Drain(ctx context.Context) error {
+	drained := p.beginDrain()
+	select {
+	case <-drained:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *Publisher) beginDrain() <-chan struct{} {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	if !p.stopping {
 		p.stopping = true
 		close(p.stopCh)
@@ -123,11 +134,5 @@ func (p *Publisher) Drain(ctx context.Context) error {
 			close(p.drained)
 		}
 	}
-	p.mu.Unlock()
-	select {
-	case <-p.drained:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return p.drained
 }

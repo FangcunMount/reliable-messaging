@@ -92,16 +92,28 @@ func (p *ManagedPublisher) Close(ctx context.Context) error {
 	if err := p.publisher.Drain(ctx); err != nil {
 		return err
 	}
-	p.stopOnce.Do(func() {
-		go func() {
-			p.producer.Stop()
-			close(p.stopped)
-		}()
-	})
+	p.stopProducer()
 	select {
 	case <-p.stopped:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// Interrupt is the explicit forced-shutdown path after a graceful Close
+// deadline. It stops admission and interrupts the driver; any in-flight
+// publication has an unknown broker outcome. Call Close again to verify drain.
+func (p *ManagedPublisher) Interrupt() {
+	p.publisher.beginDrain()
+	p.stopProducer()
+}
+
+func (p *ManagedPublisher) stopProducer() {
+	p.stopOnce.Do(func() {
+		go func() {
+			p.producer.Stop()
+			close(p.stopped)
+		}()
+	})
 }
