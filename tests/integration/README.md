@@ -2,6 +2,8 @@
 
 Run `make integration` with Go 1.25.12, Docker, Compose v2+ supporting `up --wait` and Python 3. Missing tools or unavailable Docker fail; there is no skip path. A remote Docker endpoint or DOCKER_HOST override is rejected.
 
+Run `make subscription-integration` for the focused M6-04B NSQ consumer proof. It uses the same isolated Compose manifest but starts only MySQL (as a network-isolated test runner) and NSQ, compiles the integration test binary, and runs only `TestNSQSubscriptionTerminalHandoffLostConfirmation`. Its failure handler is a controlled test callback rather than a durable database recorder; service-level dead-letter audit remains a separate acceptance gate.
+
 Every invocation creates a random Compose project with an internal network, no published ports, no bind mounts, and disposable data: MySQL/Mongo use tmpfs; NSQ uses a per-project named volume so a real broker stop/start can preserve its data. Cleanup removes only that invocation's resources, on success, failure or an ordinary interrupt. SIGKILL/host crash may leave labelled Compose resources: inspect their project ownership before manual cleanup; never prune all Docker data.
 
 Images are pinned by manifest digest: MySQL 8.0.44, MongoDB 7.0.37 and NSQ 1.3.0, using the M0 baseline. This is not a supported-production-version promise. The MySQL empty password is restricted to the disposable internal network; never use this compose file for deployment.

@@ -1,6 +1,6 @@
 GO ?= go
 GOLANGCI_VERSION := v2.5.0
-.PHONY: check fmt-check test race vet lint integration
+.PHONY: check fmt-check test race vet lint integration subscription-integration
 check: fmt-check vet test race
 fmt-check:
 	@test -z "$$(gofmt -l $$(git ls-files '*.go') $$(git ls-files --others --exclude-standard '*.go'))"
@@ -15,3 +15,5 @@ lint:
 	./bin/golangci-lint run
 integration:
 	bash scripts/integration.sh
+subscription-integration:
+	bash scripts/nsq-subscription-integration.sh
