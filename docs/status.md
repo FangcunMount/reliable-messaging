@@ -1,6 +1,6 @@
 # Milestones
 
-Current snapshot (2026-09-23): M0, M1 and M2 are accepted. IAM M3 runs the v0.1.0 SDK in production after the standard-table cutover and observation; final milestone review remains open, and the GitHub v0.1.0 Release is still marked prerelease. M4 qs-server integration is in isolated branches. SDK failure-count, wake, scan-health and update-time changes there are candidates, not a published SDK release. M5 and M6 are not accepted. The project implementation plan owns the current gates and evidence.
+Current snapshot (2026-09-27): M0, M1 and M2 are accepted. IAM M3 has production v0.1.0 cutover evidence, with final milestone review still open. SDK v0.2.1 is a published non-prerelease version; qs-server main references it, while IAM main still references v0.1.0. IAM has a separate draft v0.2.1 upgrade candidate. M5 has only M5-01 formally accepted, and M6 compatibility work is in draft PRs; neither milestone is accepted. The project implementation plan owns the current gates and evidence. M7 and the RabbitMQ B series are paused for this phase.
 
 The paragraphs below retain the milestone-by-milestone evidence as recorded when it was produced; statements such as “M2 in progress” and “M3 in progress” are historical snapshots, not the current state.
 
