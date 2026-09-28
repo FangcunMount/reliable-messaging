@@ -19,6 +19,8 @@ make subscription-integration  # focused disposable NSQ consumer proof
 
 当前已实现消息身份、原事务追加、带凭证的状态转移、受监督投递接缝与传输发布适配；`wire/legacy` 候选封装现行传输 envelope 和失败中转格式，`wire/domain` 候选封装其内部的通用事件 JSON 字段及元数据时间格式。NSQ 候选增加原始编码字节的直接发布入口、显式 topic／channel 准备，以及显式确认、有界失败中转、原 ID 保留、直接 nsqd／lookupd 订阅、SDK 管理的失败中转生产者与自持有的普通发布 Producer。`catalog` 候选承接旧组件的通用 YAML 目录校验和事件到 topic 查询，事件名称、路由配置和业务策略仍由宿主提供。IAM／QS 的显式发布订阅和服务持久审计接入已有未合并候选，生产迁移尚未完成。租户审批、业务重试授权、消费幂等、宿主迁移和上线操作仍属于各服务。
 
+`outbox.StatusBucket`／`StatusSnapshot`／`StatusReader` 候选承接通用状态形状；状态名称、数据库读取及业务治理仍由宿主实现。它只描述持久意图的观察结果，不把 `published` 解释为消费者或业务完成。
+
 ## 可靠性边界
 
 - 不新增中央消息数据库，Outbox 与业务事实使用宿主原事务。
