@@ -101,3 +101,40 @@ func TestTimeoutRetainsBoundedSlotAndDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRawPublishPreservesWireAndUsesSameDrain(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var observed []byte
+	p, err := newPublisher(sendFunc(func(topic string, body []byte) error {
+		if topic != "direct.events" {
+			t.Errorf("topic = %q", topic)
+		}
+		close(entered)
+		<-release
+		observed = append([]byte(nil), body...)
+		return nil
+	}), nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PublishRaw(context.Background(), "invalid topic", []byte("body")).Outcome != transport.Rejected ||
+		p.PublishRaw(context.Background(), "direct.events", nil).Outcome != transport.Rejected {
+		t.Fatal("invalid raw publication was accepted")
+	}
+	body := []byte(`{"uuid":"original"}`)
+	done := make(chan transport.Result, 1)
+	go func() { done <- p.PublishRaw(context.Background(), "direct.events", body) }()
+	<-entered
+	body[0] = '!'
+	close(release)
+	if (<-done).Outcome != transport.Confirmed || string(observed) != `{"uuid":"original"}` {
+		t.Fatalf("raw wire mutated or unconfirmed: %q", observed)
+	}
+	if err := p.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.PublishRaw(context.Background(), "direct.events", []byte("later")).Outcome != transport.Unknown {
+		t.Fatal("raw publish after drain accepted")
+	}
+}

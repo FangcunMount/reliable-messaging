@@ -33,8 +33,8 @@ func New(producer *driver.Producer, routes map[string]string, maxInFlight int) (
 	return newPublisher(producer, routes, maxInFlight)
 }
 func newPublisher(producer sender, routes map[string]string, maxInFlight int) (*Publisher, error) {
-	if maxInFlight < 1 || maxInFlight > 1000 || len(routes) == 0 {
-		return nil, errors.New("routes and in-flight limit 1..1000 required")
+	if maxInFlight < 1 || maxInFlight > 1000 {
+		return nil, errors.New("in-flight limit 1..1000 required")
 	}
 	copied := make(map[string]string, len(routes))
 	for destination, topic := range routes {
@@ -55,6 +55,20 @@ func (p *Publisher) Publish(ctx context.Context, m message.Message) transport.Re
 	if !ok || !m.Valid() {
 		return transport.Result{Outcome: transport.Rejected}
 	}
+	return p.publishBytes(ctx, topic, m.Input().Payload)
+}
+
+// PublishRaw sends already encoded wire bytes to an explicit NSQ topic. It is
+// for direct events and host-owned legacy adapters, not an Outbox substitute.
+// A caller must retain the same application identity and bytes after Unknown.
+func (p *Publisher) PublishRaw(ctx context.Context, topic string, body []byte) transport.Result {
+	if !driver.IsValidTopicName(topic) || len(body) == 0 {
+		return transport.Result{Outcome: transport.Rejected}
+	}
+	return p.publishBytes(ctx, topic, body)
+}
+
+func (p *Publisher) publishBytes(ctx context.Context, topic string, body []byte) transport.Result {
 	if ctx.Err() != nil {
 		return transport.Result{Outcome: transport.Unknown}
 	}
@@ -71,9 +85,10 @@ func (p *Publisher) Publish(ctx context.Context, m message.Message) transport.Re
 	}
 	p.active++
 	p.mu.Unlock()
+	ownedBody := append([]byte(nil), body...)
 	done := make(chan error, 1)
 	go func() {
-		err := p.producer.Publish(topic, m.Input().Payload)
+		err := p.producer.Publish(topic, ownedBody)
 		done <- err
 		<-p.slots
 		p.mu.Lock()

@@ -2,7 +2,7 @@
 
 独立、经过裁剪的 Go 可靠消息 SDK。宿主在原业务事务中持久化消息意图，并管理 Relay 的运行与停止；首期复用 NSQ。
 
-**截至 2026-09-27：v0.2.1 已正式发布，M6 稳定化和消息能力归属迁移仍在进行。** M6 升级说明／隔离验证 PR #8 已合入 main；历史 wire 与失败中转 codec PR #9 仍是草稿，尚未发布或接入服务。M6-04 的最终目标是由本 SDK 承载通用 MQ／消息能力，让 `component-base` 退出对应职责；目前通用 Subscriber／EventBus 尚未实现，IAM 与 qs-server 的现役订阅仍使用原组件。完整验收按项目实施规划逐项核对，不能从代码包存在推断生产切换完成。
+**截至 2026-09-27：v0.2.1 已正式发布，M6 稳定化和消息能力归属迁移仍在进行。** M6 升级说明／隔离验证 PR #8 已合入 main；历史 wire 与失败中转 codec PR #9 仍是草稿，尚未发布或接入服务。其后的 NSQ 候选提供原始字节发布、显式 topic／channel 准备、直接 nsqd 或 lookupd 发现下的 Subscriber、结算和失败中转，隔离测试已覆盖首条发布早于消费者启动、订阅先于 topic 登记、已连接 broker 的 lookupd 短时中断与恢复、临时业务 channel 更替后的稳定失败组接管、晚加入节点的强杀重连，以及 MySQL 失败审计写入拒绝／重试／恢复；发送中途断连、宿主显式生命周期接线和服务持久审计接入仍缺。M6-04 的最终目标是由本 SDK 承载通用 MQ／消息能力，让 `component-base` 退出对应职责；IAM 与 qs-server 的现役订阅仍使用原组件。完整验收按项目实施规划逐项核对，不能从代码包存在推断生产切换完成。
 
 ## 开发
 
@@ -12,11 +12,12 @@
 make check
 make lint
 make integration  # disposable local Docker resources
+make subscription-integration  # focused disposable NSQ consumer proof
 ```
 
 根目录单 module。只有实际需求出现时才创建适配器与公开包；当前 `tests/compatibility` 验证候选跨语言身份样例，`tests/architecture` 约束依赖边界。
 
-当前已实现消息身份、原事务追加、带凭证的状态转移、受监督投递接缝与传输发布适配；`wire/legacy` 候选封装现行 envelope 和失败中转格式。下一阶段将补齐通用订阅、确认、失败中转和已使用的路由接缝，再按实际调用者退役 `component-base` 消息包。租户审批、业务重试授权、消费幂等、宿主迁移和上线操作仍属于各服务。
+当前已实现消息身份、原事务追加、带凭证的状态转移、受监督投递接缝与传输发布适配；`wire/legacy` 候选封装现行 envelope 和失败中转格式。NSQ 候选增加原始编码字节的直接发布入口、显式 topic／channel 准备，以及显式确认、有界失败中转、原 ID 保留、直接 nsqd／lookupd 订阅与 SDK 管理的失败中转生产者；IAM／QS 的显式发布订阅装配、服务持久审计接入和迁移尚未完成。租户审批、业务重试授权、消费幂等、宿主迁移和上线操作仍属于各服务。
 
 ## 可靠性边界
 
