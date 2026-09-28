@@ -39,4 +39,4 @@ make subscription-integration  # focused disposable NSQ consumer proof
 
 MySQL 原事务可使用 UTC 或 UTC+8 驱动连接；标准表时间字段的显式存储约定及非 UTC 修正见 [MySQL 时间边界](storage/mysql/README.md)。
 
-详见 [契约](contracts/README.md)、[开发规则](CONTRIBUTING.md) 与 [阶段状态](docs/status.md)。
+详见 [契约](contracts/README.md)、[兼容策略候选](docs/compatibility.md)、[开发规则](CONTRIBUTING.md) 与 [阶段状态](docs/status.md)。
