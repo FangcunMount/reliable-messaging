@@ -252,7 +252,7 @@ func wasSIGKILL(err error) bool {
 	if !errors.As(err, &exitErr) {
 		return false
 	}
-	status, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus)
+	status, ok := exitErr.Sys().(syscall.WaitStatus)
 	return ok && status.Signal() == syscall.SIGKILL
 }
 
