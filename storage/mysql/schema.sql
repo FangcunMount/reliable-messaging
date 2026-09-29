@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS rm_outbox (
   failure_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
   last_error_code VARCHAR(128) NOT NULL DEFAULT '',
   transport_confirmed_at DATETIME(6) NULL,
+  manual_replay_request_id VARBINARY(64) NULL,
+  manual_replay_version BIGINT UNSIGNED NULL,
   created_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
   updated_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
   UNIQUE KEY identity_key (producer,message_id,destination),

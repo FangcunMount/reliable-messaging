@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ErrConflict   = errors.New("same delivery identity has different immutable content")
-	ErrStaleClaim = errors.New("claim expired or superseded")
+	ErrConflict     = errors.New("same delivery identity has different immutable content")
+	ErrStaleClaim   = errors.New("claim expired or superseded")
+	ErrStaleRequeue = errors.New("confirmed requeue target changed or is not confirmed")
 )
 
 type Claim struct {
