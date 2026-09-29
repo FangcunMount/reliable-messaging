@@ -2,6 +2,12 @@
 
 The host owns the original transaction, pool, connection location and session timezone. `Bind` and `BindGORM` never open another transaction, change `time_zone`, or commit on the host's behalf.
 
+## Confirmed original-message requeue
+
+`Appender.RequeueConfirmed` is an optional, explicitly invoked recovery primitive. The host first establishes that the original business effect is absent, checks the immutable original event, authorizes the action and records its decision. The SDK then conditionally changes **that same confirmed row** from `published` to `retry_wait` inside the host's transaction. It fences on record ID, version and immutable fingerprint, retains the original bytes and delivery counters, and records the host's audit request ID and new version. The method neither publishes directly nor decides whether a model call, notification or other external effect is safe to repeat. A repeated call does not silently succeed; the host resolves its durable request ledger after an unknown response.
+
+This optional method requires `manual_replay_request_id VARBINARY(64) NULL` and `manual_replay_version BIGINT UNSIGNED NULL` in the host's `rm_outbox`. New databases using `Schema` include them. Existing hosts must add them explicitly before using this method; ordinary append, claim, confirm and retry paths do not require these columns. The host owns migration timing and the business authorization ledger. `transport_confirmed_at` remains as evidence of the prior confirmation, not evidence that every consumer completed.
+
 Standard `rm_outbox` scheduling columns (`created_at`, `next_attempt_at`, `lease_until`, `transport_confirmed_at`) contain UTC clock digits in DATETIME(6). This is an explicit storage convention: MySQL DATETIME does not carry an offset. Applications and operations reports can display these instants in UTC+8. Do not apply the connection location to these raw clock digits when displaying or migrating them.
 
 For `publishing` rows, new SDK claims set `next_attempt_at` to the same instant as `lease_until`. This keeps due-order scanning comparable with `pending` and `retry_wait` rows while lease eligibility remains fenced by `lease_until`. Older in-flight rows are normalized when claimed by the new SDK; assess or drain them before relying on mixed-state fairness during an upgrade.
