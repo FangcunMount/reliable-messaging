@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -164,6 +165,7 @@ func publishAndAwaitNSQFailure(t *testing.T, ctx context.Context, cfg *driver.Co
 			}
 			return record.TransportMessageID
 		case <-ctx.Done():
+			logNSQHandoffTimeout(t, topic)
 			t.Fatal("dynamic node handoff did not settle: ", ctx.Err())
 			return ""
 		}
@@ -261,6 +263,44 @@ func waitForNSQCondition(t *testing.T, ctx context.Context, what string, ready f
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for %s: %v", what, ctx.Err())
 		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// Use an independent, bounded context: the scenario context has already
+// expired. Report only this test's source and failure topics, before cleanup
+// removes clients and the diagnostic RDY/in-flight state.
+func logNSQHandoffTimeout(t *testing.T, topic string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for _, endpoint := range []string{os.Getenv("RM_TEST_NSQ_HTTP"), "http://127.0.0.1:4251"} {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/stats?format=json", nil)
+		if err != nil {
+			t.Logf("handoff timeout stats %s: %v", endpoint, err)
+			continue
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Logf("handoff timeout stats %s: %v", endpoint, err)
+			continue
+		}
+		var stats struct {
+			Topics []json.RawMessage `json:"topics"`
+		}
+		err = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&stats)
+		response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusOK {
+			t.Logf("handoff timeout stats %s: status=%d error=%v", endpoint, response.StatusCode, err)
+			continue
+		}
+		for _, raw := range stats.Topics {
+			var item struct {
+				Name string `json:"topic_name"`
+			}
+			if json.Unmarshal(raw, &item) == nil && (item.Name == topic || item.Name == legacy.FailedHandoffTopic(topic, "business")) {
+				t.Logf("handoff timeout stats %s: %s", endpoint, raw)
+			}
 		}
 	}
 }

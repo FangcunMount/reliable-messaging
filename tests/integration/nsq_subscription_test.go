@@ -561,6 +561,14 @@ func TestNSQSubscriberLookupdOutageWithConnectedBroker(t *testing.T) {
 	cfg.WriteTimeout = time.Second
 	cfg.LookupdPollInterval = 250 * time.Millisecond
 	cfg.LookupdPollJitter = 0
+	// With one shared RDY slot and two nodes, the driver's default 5s
+	// redistribution plus 10s idle timeout makes this two-stage recovery
+	// depend on a few random node selections. Specify the low-RDY test
+	// profile; keep the same concurrency, deadline and identity assertions.
+	// This does not claim a recovery bound for production driver defaults.
+	cfg.LowRdyIdleTimeout = time.Second
+	cfg.LowRdyTimeout = time.Second
+	cfg.RDYRedistributeInterval = 100 * time.Millisecond
 	subscriber, err := adapter.NewSubscriber(adapter.SubscriberConfig{
 		LookupdAddresses: []string{strings.TrimPrefix(proxy.URL, "http://")}, Driver: cfg,
 		MaxInFlight: 1, MaxAttempts: 1,
