@@ -29,12 +29,26 @@ class TransactionAppender:
             raise TransactionBindingError("active original SQLAlchemy transaction required")
 
     async def append(self, statement: Insert) -> None:
-        self._check()
+        await self.validate()
         if not isinstance(statement, Insert):
             raise TypeError("append requires a host-defined INSERT")
         # The host supplies the schema, values and duplicate identity policy.
         # Never begin, commit, roll back, close or dispose a borrowed resource.
         await self._db.execute(statement)
+
+    async def validate(self) -> None:
+        """Verify the real MySQL driver's transaction mode, not just ORM bookkeeping."""
+        self._check()
+        connection = (
+            await self._db.connection() if isinstance(self._db, AsyncSession) else self._db
+        )
+        if connection.dialect.name != "mysql":
+            raise TransactionBindingError("minimal appender supports MySQL async transactions only")
+        raw = await connection.get_raw_connection()
+        get_autocommit = getattr(raw.driver_connection, "get_autocommit", None)
+        if get_autocommit is None or get_autocommit():
+            raise TransactionBindingError("a real non-autocommit MySQL transaction is required")
+        self._check()
 
 
 def bind(db: AsyncSession | AsyncConnection) -> TransactionAppender:
@@ -69,7 +83,7 @@ class MySQLPendingOutbox:
         return list(rows.scalars())
 
     async def delivered(self, db: AsyncSession, event_id: str) -> None:
-        self._require_transaction(db)
+        await self._require_transaction(db)
         table = self._table
         await db.execute(
             update(table)
@@ -78,7 +92,7 @@ class MySQLPendingOutbox:
         )
 
     async def retry(self, db: AsyncSession, event_id: str) -> None:
-        self._require_transaction(db)
+        await self._require_transaction(db)
         table = self._table
         await db.execute(
             update(table)
@@ -97,5 +111,5 @@ class MySQLPendingOutbox:
         )
 
     @staticmethod
-    def _require_transaction(db: AsyncSession) -> None:
-        bind(db)  # Fail before execute can autobegin a settlement transaction.
+    async def _require_transaction(db: AsyncSession) -> None:
+        await bind(db).validate()  # Fail before execute can autobegin a settlement transaction.

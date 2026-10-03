@@ -20,11 +20,15 @@ async with host_session.begin():
 ```
 
 The host supplies an INSERT (including its original duplicate identity policy).
-Binding needs an already active AsyncSession/AsyncConnection transaction. It also
+Binding needs an already active MySQL AsyncSession/AsyncConnection transaction. It also
 supports a transaction autobegun by earlier host operations; bind/append itself never
 begins one. A binding cannot outlive its original transaction or savepoint. Append
 does not begin/commit/rollback/close a transaction or dispose a pool. The host must
 roll back on append failure or cancellation. No schema is installed by constructors.
+Before writing, the adapter checks the borrowed driver's actual get_autocommit flag;
+SQLAlchemy's logical begin alone cannot prove a real transaction. AUTOCOMMIT and
+drivers without that verification method are rejected. asyncmy is the tested driver;
+other databases/drivers are not claimed as supported by this minimal appender.
 
 `MySQLPendingOutbox` borrows the host Table with event_id/payload/delivered/attempts/
 available_at/delivered_at columns. Settlement needs an explicit host transaction;

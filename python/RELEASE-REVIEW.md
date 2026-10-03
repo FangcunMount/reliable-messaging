@@ -12,10 +12,13 @@ Distribution/import: fangcun-reliable-messaging / reliable_messaging, 0.1.0a1.
   constructors cover hash, IDs, UTF-8 byte bounds, uint64 JSON values, defaults/null,
   original timestamp offsets/fractions and outcome numeric values. Host wire validation
   is not inferred from generic Message validity.
-- 21 local tests passed, no skips: async settlement/lifecycle plus real MySQL original
+- 22 tests cover async settlement/lifecycle plus real MySQL original
   transaction, commit/rollback, cancellation, replacement/savepoint rejection, borrowed
   engine usability, unchanged JSON, duplicate acknowledgement, clocks and subprocess
   SIGKILL/restart/notification loss.
+- The added final gate rejects actual driver AUTOCOMMIT even when the SQLAlchemy
+  transaction object claims to be active. The supported original binding is MySQL
+  asyncmy; unverified driver modes fail closed. Final-source CI must include this gate.
 - Local storage runs: MySQL 8.0.44 with SQLAlchemy 2.0.52; a second fully separate native
   MySQL 9.3 with SQLAlchemy 2.0.54. Native 9.3 is supplemental, not target-version proof.
   The independent workflow tests Python 3.11/MySQL 8.0.36 and Python 3.13/MySQL 8.4;
@@ -25,7 +28,7 @@ Distribution/import: fangcun-reliable-messaging / reliable_messaging, 0.1.0a1.
   bind its own exact CI artifact hashes, not reuse an unrelated build.
 - The first target-version CI exposed missing cryptography for cold caching_sha2
   authentication; the test dependency is now explicit. Failed logs are retained.
-  A superseded 20-test CI run is not acceptance of the final 21-test source.
+  Superseded 20/21-test CI runs are not acceptance of the final 22-test source.
 
 ## Constraints and cutover
 

@@ -118,6 +118,21 @@ async def test_cancelled_host_transaction_rolls_back_both(storage):
     assert await count(sessions, business) == await count(sessions, queue) == 0
 
 
+async def test_orm_transaction_cannot_hide_driver_autocommit(storage):
+    engine, sessions = storage
+    autocommit = engine.execution_options(isolation_level="AUTOCOMMIT")
+    factory = async_sessionmaker(autocommit, expire_on_commit=False)
+    async with factory.begin() as db:
+        assert db.get_transaction().is_active  # SQLAlchemy's logical transaction is insufficient.
+        with pytest.raises(TransactionBindingError, match="non-autocommit"):
+            await append(db)
+    async with autocommit.connect() as conn:
+        async with conn.begin():
+            with pytest.raises(TransactionBindingError, match="non-autocommit"):
+                await bind(conn).append(insert(business).values(id="autocommit"))
+    assert await count(sessions, business) == await count(sessions, queue) == 0
+
+
 async def test_json_identity_duplicate_settlement_and_timezone(storage):
     _, sessions = storage
     adapter = MySQLPendingOutbox(queue, max_retry_seconds=3)
