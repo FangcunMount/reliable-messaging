@@ -83,7 +83,7 @@ jobs:
           uv run python - <<'PY'
           import hashlib, json, os
           from pathlib import Path
-          assets = sorted(Path('dist').glob('*'))
+          assets = sorted([*Path('dist').glob('*.whl'), *Path('dist').glob('*.tar.gz')])
           if len(assets) != 2:
               raise SystemExit('Expected one wheel and one source archive')
           review = {'source': os.environ['GITHUB_SHA'], 'formally_published': False,
