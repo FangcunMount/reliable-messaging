@@ -1,4 +1,4 @@
-.venv/
+.venv*/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
@@ -7,3 +7,4 @@ dist/
 .wheel-smoke/
 artifact-review.json
 results.xml
+wheel-results.xml

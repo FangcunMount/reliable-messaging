@@ -1,10 +1,10 @@
-name: Python M7
+name: Python messaging SDK
 on:
   push:
-    branches: [main, codex/m7-python-sdk]
-    paths: ['python/**', '.github/workflows/python.yml']
+    branches: [main, codex/m7-python-sdk, codex/ai-mq-sdk]
+    paths: ['python/**', 'contracts/**', 'wire/protected/**', 'wire/legacy/**', 'delivery/mysql/**', 'tests/integration/protectedprobe/**', 'go.mod', 'go.sum', '.github/workflows/python.yml']
   pull_request:
-    paths: ['python/**', '.github/workflows/python.yml']
+    paths: ['python/**', 'contracts/**', 'wire/protected/**', 'wire/legacy/**', 'delivery/mysql/**', 'tests/integration/protectedprobe/**', 'go.mod', 'go.sum', '.github/workflows/python.yml']
 permissions:
   contents: read
 jobs:
@@ -36,6 +36,8 @@ jobs:
     env:
       TZ: Asia/Shanghai
       RM_M7_MYSQL_URL: mysql+asyncmy://m7:m7_disposable_only@127.0.0.1:3306/rm_m7
+      RM_MQ_NSQ_TCP: 127.0.0.1:4150
+      RM_MQ_NSQ_HTTP: http://127.0.0.1:4151
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -46,15 +48,21 @@ jobs:
         with:
           go-version: '1.25.12'
           cache: false
-      - run: uv sync --locked
-      - run: uv run ruff check src tests
-      - run: uv run ruff format --check src tests
-      - run: uv run mypy src
-      - name: Contract, original transaction and process recovery
-        run: uv run pytest -q --junitxml=results.xml
+      - name: Start dedicated NSQ with the production message-size limit
+        run: >-
+          docker run --detach --name rm-python-mq-nsq --memory=128m --cpus=1
+          --tmpfs /data:rw,size=64m -p 127.0.0.1:4150:4150 -p 127.0.0.1:4151:4151
+          nsqio/nsq:v1.3.0 /nsqd --data-path=/data --broadcast-address=127.0.0.1
+          --max-msg-size=262144 --mem-queue-size=3000 --sync-every=2500 --sync-timeout=2s
+      - run: uv sync --locked --extra nsq
+      - run: uv run --locked --extra nsq ruff check src tests
+      - run: uv run --locked --extra nsq ruff format --check src tests
+      - run: uv run --locked --extra nsq mypy src
+      - name: Contract, NSQ lifecycle, original transaction and process recovery
+        run: uv run --locked --extra nsq pytest -q --junitxml=results.xml
       - name: Require nonempty acceptance with no skipped cases
         run: |
-          uv run python - <<'PY'
+          uv run --locked --extra nsq python - <<'PY'
           import xml.etree.ElementTree as ET
           root = ET.parse('results.xml').getroot()
           suites = list(root.iter('testsuite'))
@@ -70,17 +78,33 @@ jobs:
       - name: Verify installed wheel independently of the source tree
         run: |
           uv venv .wheel-smoke
-          uv pip install --python .wheel-smoke/bin/python dist/*.whl
+          task_wheels=(dist/*.whl)
+          test "${#task_wheels[@]}" -eq 1
+          uv pip install --python .wheel-smoke/bin/python "${task_wheels[0]}[nsq]"
           .wheel-smoke/bin/python - <<'PY'
           from importlib.metadata import version
           from pathlib import Path
           import reliable_messaging
-          assert version('fangcun-reliable-messaging') == '0.1.0a1'
+          assert version('fangcun-reliable-messaging') == '0.2.0a1'
           assert (Path(reliable_messaging.__file__).parent / 'py.typed').is_file()
+          from reliable_messaging.nsq import NSQPublisher
+          from reliable_messaging.protected import Context
+          assert NSQPublisher('127.0.0.1:4150')._client is None
+          PY
+      - name: Run required acceptance against the installed wheel
+        run: |
+          uv pip install --python .wheel-smoke/bin/python pytest==9.1.1 pytest-asyncio==1.4.0 asyncmy==0.2.14
+          .wheel-smoke/bin/python -m pytest -q --junitxml=wheel-results.xml
+          .wheel-smoke/bin/python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('wheel-results.xml').getroot()
+          cases = list(root.iter('testcase'))
+          if not cases or any(list(root.iter(k)) for k in ('skipped', 'error', 'failure')):
+              raise SystemExit('Required installed-wheel acceptance is empty or unsuccessful')
           PY
       - name: Bind candidate assets to their exact source
         run: |
-          uv run python - <<'PY'
+          uv run --locked --extra nsq python - <<'PY'
           import hashlib, json, os
           from pathlib import Path
           assets = sorted([*Path('dist').glob('*.whl'), *Path('dist').glob('*.tar.gz')])
@@ -93,9 +117,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: m7-python-${{ matrix.python }}-mysql-${{ matrix.mysql }}
+          name: python-${{ matrix.python }}-mysql-${{ matrix.mysql }}
           path: |
             python/results.xml
+            python/wheel-results.xml
             python/dist/*
             python/artifact-review.json
           if-no-files-found: error
+      - name: Remove only this job's disposable NSQ
+        if: always()
+        run: docker rm -f rm-python-mq-nsq
