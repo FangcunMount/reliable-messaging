@@ -5,6 +5,7 @@ go 1.25.9
 toolchain go1.25.12
 
 require (
+	github.com/go-jose/go-jose/v4 v4.1.5
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/nsqio/go-nsq v1.1.0
 	go.mongodb.org/mongo-driver v1.17.6

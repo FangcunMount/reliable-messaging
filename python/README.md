@@ -1,15 +1,21 @@
 # Python minimal SDK (M7)
 
 Independent distribution `fangcun-reliable-messaging`, import `reliable_messaging`,
-version `0.1.0a1`, published as the independent GitHub prerelease
+published version `0.1.0a1`, as the independent GitHub prerelease
 [`python/v0.1.0a1`](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.1.0a1)
 from source `fea92389967076e3529289e80b1d96abef76dc73`. Python 3.11–3.13,
 SQLAlchemy 2.0 async; no dependency on host repositories or the Go runtime.
 
+This checkout prepares `0.2.0a1`, with optional NSQ transport, strict JOSE and a
+separate durable-business-confirmation adapter. See [NSQ.md](NSQ.md) for the candidate
+scope and lifecycle. It is not formally published. The following M7 core contract
+remains supported; NSQ PUB confirmation does not replace its business receipt callback.
+
 Supported scope: immutable message identity/fingerprint, durable result acknowledgement
 settlement, original SQLAlchemy transaction binding, an adapter over an **existing**
 pending/delivered JSON outbox, and optional explicit async start/stop polling.
-There is no Python broker, leased Go Store, workflow engine, schema migration or new database.
+The published M7 core has no broker adapter. Neither version adds a leased Go Store,
+workflow engine, automatic schema migration or new database.
 
 ## Resource and transaction ownership
 
@@ -90,8 +96,12 @@ Tests separate fixtures, async unit semantics and disposable MySQL/process recov
 Required MySQL tests fail without RM_M7_MYSQL_URL; they never silently skip.
 No real model calls, candidate activation, production access or Go acceptance replay.
 
+For the full candidate suite run `uv sync --locked --extra nsq` first.
 Run from python/: `PYTHONPATH=src pytest -m 'not integration'`; for real storage,
 set a disposable `RM_M7_MYSQL_URL` and run `PYTHONPATH=src pytest -m integration`.
+NSQ tests require `RM_MQ_NSQ_TCP` and `RM_MQ_NSQ_HTTP`. The crash-loss test creates,
+labels and deletes only its own NSQ container and requires Docker; missing dependencies
+fail required acceptance instead of skipping it.
 Use `uv build` for independent wheel/sdist. The existing prerelease assets are fixed;
 building the current checkout does not authorize replacing them. Future Python releases
 and production changes require separate review of fixed artifact hashes, CI and rollback.
