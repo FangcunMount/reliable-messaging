@@ -12,7 +12,7 @@ Distribution/import: fangcun-reliable-messaging / reliable_messaging, 0.1.0a1.
   constructors cover hash, IDs, UTF-8 byte bounds, uint64 JSON values, defaults/null,
   original timestamp offsets/fractions and outcome numeric values. Host wire validation
   is not inferred from generic Message validity.
-- 20 local tests passed, no skips: async settlement/lifecycle plus real MySQL original
+- 21 local tests passed, no skips: async settlement/lifecycle plus real MySQL original
   transaction, commit/rollback, cancellation, replacement/savepoint rejection, borrowed
   engine usability, unchanged JSON, duplicate acknowledgement, clocks and subprocess
   SIGKILL/restart/notification loss.
@@ -20,9 +20,12 @@ Distribution/import: fangcun-reliable-messaging / reliable_messaging, 0.1.0a1.
   MySQL 9.3 with SQLAlchemy 2.0.54. Native 9.3 is supplemental, not target-version proof.
   The independent workflow tests Python 3.11/MySQL 8.0.36 and Python 3.13/MySQL 8.4;
   its terminal results must be checked before treating those combinations as verified.
-- Ruff format/lint and mypy passed. Independent wheel/sdist built locally. Local wheel
-  hash: d18fc1d4227383c03dafae6e1d5d31d0f6794b032094053d181c54e291a63aff.
-  A release must bind its own exact CI artifact hashes, not reuse an unrelated build.
+- Ruff format/lint and mypy passed. Independent wheel/sdist built locally; exact
+  candidate source/artifact hashes belong in the M7 evidence record. A release must
+  bind its own exact CI artifact hashes, not reuse an unrelated build.
+- The first target-version CI exposed missing cryptography for cold caching_sha2
+  authentication; the test dependency is now explicit. Failed logs are retained.
+  A superseded 20-test CI run is not acceptance of the final 21-test source.
 
 ## Constraints and cutover
 

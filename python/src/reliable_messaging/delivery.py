@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
-from typing import Protocol
+from typing import Protocol, cast
 
 
 class Outcome(IntEnum):
@@ -45,7 +45,9 @@ async def deliver_durable(
     Cancellation leaves the durable row available; persistence errors propagate.
     """
     try:
-        await accept()
+        receipt = await cast(Callable[[], Awaitable[object]], accept)()
+        if isinstance(receipt, DeliveryResult):
+            raise TypeError("transport result cannot replace a verified durable receipt callback")
     except Exception as error:
         await store.retry(event_id)
         return DeliveryResult(

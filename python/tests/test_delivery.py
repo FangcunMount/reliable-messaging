@@ -3,7 +3,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from reliable_messaging import Confirmation, DeliveryRejected, Outcome, deliver_durable
+from reliable_messaging import (
+    Confirmation,
+    DeliveryRejected,
+    DeliveryResult,
+    Outcome,
+    deliver_durable,
+)
 
 
 @pytest.mark.parametrize(
@@ -51,3 +57,12 @@ async def test_durable_confirmation_follows_receipt_then_persistence():
     assert order == [("receipt", "original"), ("persist", "original")]
     assert result.outcome == Outcome.CONFIRMED
     assert result.confirmation != Confirmation.BROKER
+
+
+async def test_broker_result_cannot_settle_a_durable_notification():
+    store = AsyncMock()
+    broker = AsyncMock(return_value=DeliveryResult(Outcome.CONFIRMED, Confirmation.BROKER))
+    result = await deliver_durable("original", store, broker)
+    assert result.outcome == Outcome.UNKNOWN and isinstance(result.error, TypeError)
+    store.delivered.assert_not_awaited()
+    store.retry.assert_awaited_once_with("original")
