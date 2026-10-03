@@ -1,10 +1,10 @@
 name: Python messaging SDK
 on:
   push:
-    branches: [main, codex/m7-python-sdk, codex/ai-mq-sdk]
-    paths: ['python/**', 'contracts/**', 'wire/protected/**', 'wire/legacy/**', 'delivery/mysql/**', 'tests/integration/protectedprobe/**', 'go.mod', 'go.sum', '.github/workflows/python.yml']
+    branches: [main, codex/m7-python-sdk, codex/ai-mq-sdk, codex/ai-mq-ack-budget]
+    paths: ['python/**', 'contracts/**', 'wire/protected/**', 'wire/legacy/**', 'delivery/mysql/**', 'tests/integration/protectedprobe/**', 'tests/integration/ackbudget/**', 'go.mod', 'go.sum', '.github/workflows/python.yml']
   pull_request:
-    paths: ['python/**', 'contracts/**', 'wire/protected/**', 'wire/legacy/**', 'delivery/mysql/**', 'tests/integration/protectedprobe/**', 'go.mod', 'go.sum', '.github/workflows/python.yml']
+    paths: ['python/**', 'contracts/**', 'wire/protected/**', 'wire/legacy/**', 'delivery/mysql/**', 'tests/integration/protectedprobe/**', 'tests/integration/ackbudget/**', 'go.mod', 'go.sum', '.github/workflows/python.yml']
 permissions:
   contents: read
 jobs:
@@ -16,8 +16,10 @@ jobs:
         include:
           - python: '3.11'
             mysql: '8.0.36'
+            go: '1.25.9'
           - python: '3.13'
             mysql: '8.4'
+            go: '1.25.12'
     services:
       mysql:
         image: mysql:${{ matrix.mysql }}
@@ -35,19 +37,36 @@ jobs:
         working-directory: python
     env:
       TZ: Asia/Shanghai
+      GOTOOLCHAIN: local
       RM_M7_MYSQL_URL: mysql+asyncmy://m7:m7_disposable_only@127.0.0.1:3306/rm_m7
+      RM_MQ_DURABLE_TEST_DSN: 'm7:m7_disposable_only@tcp(127.0.0.1:3306)/rm_m7?parseTime=true'
       RM_MQ_NSQ_TCP: 127.0.0.1:4150
       RM_MQ_NSQ_HTTP: http://127.0.0.1:4151
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.12.13'
           python-version: ${{ matrix.python }}
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.12'
+          go-version: ${{ matrix.go }}
           cache: false
+      - name: Verify persistent final ACK budgets in the new Go adapter
+        working-directory: .
+        run: |
+          go test -count=1 -race -tags=integration -json ./tests/integration/ackbudget > python/ack-budget-go.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(r) for r in Path('python/ack-budget-go.json').read_text().splitlines()]
+          passed = {r['Test'] for r in rows if r['Action'] == 'pass' and 'Test' in r}
+          required = {'TestMQSuccessfulAckReplaysPreserveFailureBudgetAndOriginalWire', 'TestMQHeldAckCannotBeRearmedByCommittedDuplicate'}
+          if not required <= passed or any(r['Action'] in ('fail', 'build-fail', 'skip') for r in rows):
+              raise SystemExit('Required final ACK storage tests did not pass')
+          PY
       - name: Start dedicated NSQ with the production message-size limit
         run: >-
           docker run --detach --name rm-python-mq-nsq --memory=128m --cpus=1
@@ -73,6 +92,9 @@ jobs:
               raise SystemExit('Required acceptance contains skipped or failed cases')
           if any(list(root.iter(k)) for k in ('skipped', 'error', 'failure')):
               raise SystemExit('Required acceptance contains unsuccessful test cases')
+          required = {'test_successful_final_ack_replays_do_not_spend_failure_budget', 'test_final_ack_hold_survives_duplicate_without_new_budget'}
+          if not required <= {c.get('name') for c in cases}:
+              raise SystemExit('Required final ACK budget acceptance is absent')
           PY
       - run: uv build
       - name: Verify installed wheel independently of the source tree
@@ -85,7 +107,7 @@ jobs:
           from importlib.metadata import version
           from pathlib import Path
           import reliable_messaging
-          assert version('fangcun-reliable-messaging') == '0.2.0a1'
+          assert version('fangcun-reliable-messaging') == '0.2.0a2'
           assert (Path(reliable_messaging.__file__).parent / 'py.typed').is_file()
           from reliable_messaging.nsq import NSQPublisher
           from reliable_messaging.protected import Context
@@ -101,17 +123,27 @@ jobs:
           cases = list(root.iter('testcase'))
           if not cases or any(list(root.iter(k)) for k in ('skipped', 'error', 'failure')):
               raise SystemExit('Required installed-wheel acceptance is empty or unsuccessful')
+          required = {'test_successful_final_ack_replays_do_not_spend_failure_budget', 'test_final_ack_hold_survives_duplicate_without_new_budget'}
+          if not required <= {c.get('name') for c in cases}:
+              raise SystemExit('Required installed-wheel final ACK budget acceptance is absent')
           PY
       - name: Bind candidate assets to their exact source
         run: |
           uv run --locked --extra nsq python - <<'PY'
-          import hashlib, json, os
+          import hashlib, json, subprocess
           from pathlib import Path
           assets = sorted([*Path('dist').glob('*.whl'), *Path('dist').glob('*.tar.gz')])
           if len(assets) != 2:
               raise SystemExit('Expected one wheel and one source archive')
-          review = {'source': os.environ['GITHUB_SHA'], 'formally_published': False,
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          tree = subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip()
+          review = {'source': source, 'source_tree': tree, 'formally_published': False,
                     'assets': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in assets}}
+          import tarfile
+          archive = next(p for p in assets if p.name.endswith('.tar.gz'))
+          with tarfile.open(archive) as source_archive:
+              if any(p.endswith(('results.xml', 'wheel-results.xml', 'ack-budget-go.json', 'artifact-review.json')) for p in source_archive.getnames()):
+                  raise SystemExit('Source archive contains generated acceptance output')
           Path('artifact-review.json').write_text(json.dumps(review, indent=2) + '\n')
           PY
       - uses: actions/upload-artifact@v4
@@ -121,6 +153,7 @@ jobs:
           path: |
             python/results.xml
             python/wheel-results.xml
+            python/ack-budget-go.json
             python/dist/*
             python/artifact-review.json
           if-no-files-found: error

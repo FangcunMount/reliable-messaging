@@ -22,7 +22,9 @@ type Record struct {
 	AggregateSequence        uint64
 	Ordered, RequiresReceipt bool
 	Stage                    string
-	Attempts                 uint64
+	// Receipt-required records count unconfirmed delivery attempts. Final ACKs
+	// count failed/uncertain PUB only; successful duplicate ACK PUB spends none.
+	Attempts uint64
 }
 type Outbox struct{ table string }
 
@@ -84,6 +86,8 @@ func (o *Outbox) Pending(ctx context.Context, tx *sql.Tx, limit int) ([]Record, 
 }
 
 // Published never confirms a message that requires the receiver's durable receipt.
+// A receipt-free final ACK ends at PUB OK: successful replays do not consume
+// its persistent failure budget. Retry still counts every uncertain/failed PUB.
 func (o *Outbox) Published(ctx context.Context, tx *sql.Tx, id Identity, hash string, waitSeconds int) error {
 	if waitSeconds < 1 || waitSeconds > 60 {
 		return errors.New("receipt wait must be 1..60 seconds")
@@ -99,7 +103,7 @@ func (o *Outbox) Published(ctx context.Context, tx *sql.Tx, id Identity, hash st
 	if !r.RequiresReceipt {
 		stage = "confirmed"
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE "+o.table+" SET stage=?,attempts=attempts+1,published_at=UTC_TIMESTAMP(6),confirmed_at=IF(requires_receipt=0,UTC_TIMESTAMP(6),NULL),available_at=TIMESTAMPADD(SECOND,?,UTC_TIMESTAMP(6)),error_code='' WHERE producer=? AND destination=? AND message_id=?", stage, waitSeconds, id.Producer, id.Destination, id.MessageID)
+	_, err = tx.ExecContext(ctx, "UPDATE "+o.table+" SET stage=?,attempts=IF(requires_receipt=1,attempts+1,attempts),published_at=UTC_TIMESTAMP(6),confirmed_at=IF(requires_receipt=0,UTC_TIMESTAMP(6),NULL),available_at=TIMESTAMPADD(SECOND,?,UTC_TIMESTAMP(6)),error_code='' WHERE producer=? AND destination=? AND message_id=?", stage, waitSeconds, id.Producer, id.Destination, id.MessageID)
 	return err
 }
 
@@ -150,6 +154,9 @@ func (o *Outbox) RearmAck(ctx context.Context, tx *sql.Tx, id Identity, hash str
 	}
 	if r.RequiresReceipt {
 		return ErrConflict
+	}
+	if r.Stage == "held" {
+		return nil // committed duplicates cannot revoke a persistent technical hold
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE "+o.table+" SET stage='staged',available_at=UTC_TIMESTAMP(6),confirmed_at=NULL,error_code='' WHERE producer=? AND destination=? AND message_id=?", id.Producer, id.Destination, id.MessageID)
 	return err

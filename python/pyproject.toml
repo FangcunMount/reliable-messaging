@@ -1,6 +1,6 @@
 [project]
 name = "fangcun-reliable-messaging"
-version = "0.2.0a1"
+version = "0.2.0a2"
 description = "Embedded async delivery mechanisms with host-owned SQLAlchemy transactions"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -23,7 +23,7 @@ build-backend = "hatchling.build"
 packages = ["src/reliable_messaging"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["results.xml", "wheel-results.xml"]
+exclude = ["results.xml", "wheel-results.xml", "ack-budget-go.json", "artifact-review.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

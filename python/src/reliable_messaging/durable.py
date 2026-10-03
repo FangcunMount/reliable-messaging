@@ -126,7 +126,9 @@ class MySQLDurableOutbox:
             .where(self._identity(identity))
             .values(
                 stage=AWAITING_RECEIPT if receipt else CONFIRMED,
-                attempts=self.table.c.attempts + 1,
+                # Receipt-free ACKs finish at PUB OK. Only failed/uncertain PUB
+                # spends their budget; duplicate successful PUB is notification.
+                attempts=self.table.c.attempts + 1 if receipt else self.table.c.attempts,
                 published_at=func.utc_timestamp(6),
                 confirmed_at=None if receipt else func.utc_timestamp(6),
                 available_at=later,
@@ -199,6 +201,8 @@ class MySQLDurableOutbox:
         row = await self._locked(db, identity, body_sha256)
         if row["requires_receipt"]:
             raise MessageConflict("only receipt-free acknowledgements can be automatically rearmed")
+        if row["stage"] == HELD:
+            return  # duplicates cannot revoke a persistent hold or renew its budget
         await db.execute(
             update(self.table)
             .where(self._identity(identity))

@@ -6,7 +6,7 @@ published version `0.1.0a1`, as the independent GitHub prerelease
 from source `fea92389967076e3529289e80b1d96abef76dc73`. Python 3.11–3.13,
 SQLAlchemy 2.0 async; no dependency on host repositories or the Go runtime.
 
-This checkout prepares `0.2.0a1`, with optional NSQ transport, strict JOSE and a
+This checkout prepares `0.2.0a2`, with optional NSQ transport, strict JOSE and a
 separate durable-business-confirmation adapter. See [NSQ.md](NSQ.md) for the candidate
 scope and lifecycle. It is not formally published. The following M7 core contract
 remains supported; NSQ PUB confirmation does not replace its business receipt callback.
