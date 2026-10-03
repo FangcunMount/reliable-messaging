@@ -1,0 +1,40 @@
+[project]
+name = "fangcun-reliable-messaging"
+version = "0.1.0a1"
+description = "Embedded async delivery mechanisms with host-owned SQLAlchemy transactions"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = ["sqlalchemy[asyncio]>=2.0,<2.1"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12,<1", "mypy>=1.15,<2",
+  "asyncmy>=0.2.9,<0.3", "cryptography>=44,<50",
+]
+
+[build-system]
+requires = ["hatchling>=1.26,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reliable_messaging"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["results.xml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["integration: requires a disposable MySQL database"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/reliable_messaging"]
+disallow_untyped_defs = true

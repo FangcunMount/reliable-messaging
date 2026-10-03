@@ -4,6 +4,15 @@
 
 **截至 2026-09-29：v0.2.1 是最近的非预发布版，v0.3.0-m6.2 已预发布；M6 稳定化和消息能力归属迁移仍在进行。** IAM、qs-server 当前主线仍固定 v0.3.0-m6.1，最近一次生产镜像核验也为该版本，QS 未合并恢复草稿固定 m6.2。m6.1 已提供历史 wire、通用事件目录、原始字节发布、显式 topic／channel 准备、Subscriber／失败中转和 SDK 自持有的 NSQ Producer；m6.2 新增宿主事务绑定的已确认原 Outbox 行条件重排及参考表审计列，不能跳过宿主业务资格、审批或数据库迁移。隔离 NSQ／MySQL／MongoDB 验证不等于宿主全部业务流、生产回退或长期容量验收。旧 `component-base` 消息路径仍保留；M6-04 的最终目标是由本 SDK 承载受支持的通用 MQ／消息能力，让 `component-base` 退出对应职责。完整门槛见项目实施规划和[兼容策略](docs/compatibility.md)。
 
+## Python 最小 SDK
+
+Python 包位于 [`python/`](python/README.md)，发行名 `fangcun-reliable-messaging`，导入名
+`reliable_messaging`。独立预发布版
+[`python/v0.1.0a1`](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.1.0a1)
+提供消息身份/hash、SQLAlchemy 原事务绑定、现有 Outbox 表适配、业务持久回执结算和显式异步生命周期。
+支持 Python 3.11–3.13，已验证的事务绑定限于 MySQL/asyncmy；不包含 Python NSQ、业务执行或恢复状态机。
+qs-ai 复用这些机制，保留原 gRPC 持久回执和同进程后台循环。Python 与 Go 独立版本发布；本节不改变上方 Go 阶段状态。
+
 ## 开发
 
 使用 Go 1.25.9 或以上；验证工具链固定 Go 1.25.12，golangci-lint v2.5.0。
@@ -27,7 +36,7 @@ make subscription-integration  # focused disposable NSQ consumer proof
 - Broker 发布确认不代表消费者完成，更不自动解决 MySQL 双写。
 - 传输重试保持消息身份，业务重试授权留宿主；未知外部调用不盲目重发。
 - 历史未完成消息、wire、人工治理、冻结配置及回滚语义必须保护。IAM 已选择旧链路排空后使用标准表，标准表仍属于宿主原数据库。
-- 双存储与故障验证在 M2；IAM、qs-server 切换分别在 M3/M5；Python 和 RabbitMQ 独立评估。
+- 双存储与故障验证在 M2；IAM、qs-server 切换分别在 M3/M5；Python 最小 SDK 见上节，RabbitMQ 独立评估。
 
 ## 维护与分发
 

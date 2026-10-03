@@ -1,0 +1,101 @@
+name: Python M7
+on:
+  push:
+    branches: [main, codex/m7-python-sdk]
+    paths: ['python/**', '.github/workflows/python.yml']
+  pull_request:
+    paths: ['python/**', '.github/workflows/python.yml']
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: '3.11'
+            mysql: '8.0.36'
+          - python: '3.13'
+            mysql: '8.4'
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_DATABASE: rm_m7
+          MYSQL_USER: m7
+          MYSQL_PASSWORD: m7_disposable_only
+          MYSQL_ROOT_PASSWORD: m7_root_disposable_only
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pm7_root_disposable_only --silent"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+    defaults:
+      run:
+        working-directory: python
+    env:
+      TZ: Asia/Shanghai
+      RM_M7_MYSQL_URL: mysql+asyncmy://m7:m7_disposable_only@127.0.0.1:3306/rm_m7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.13'
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - run: uv sync --locked
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy src
+      - name: Contract, original transaction and process recovery
+        run: uv run pytest -q --junitxml=results.xml
+      - name: Require nonempty acceptance with no skipped cases
+        run: |
+          uv run python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('results.xml').getroot()
+          suites = list(root.iter('testsuite'))
+          cases = list(root.iter('testcase'))
+          if not suites or not cases or sum(int(s.get('tests', 0)) for s in suites) <= 0:
+              raise SystemExit('Required acceptance report is empty')
+          if any(int(s.get(k, 0)) != 0 for s in suites for k in ('skipped', 'errors', 'failures')):
+              raise SystemExit('Required acceptance contains skipped or failed cases')
+          if any(list(root.iter(k)) for k in ('skipped', 'error', 'failure')):
+              raise SystemExit('Required acceptance contains unsuccessful test cases')
+          PY
+      - run: uv build
+      - name: Verify installed wheel independently of the source tree
+        run: |
+          uv venv .wheel-smoke
+          uv pip install --python .wheel-smoke/bin/python dist/*.whl
+          .wheel-smoke/bin/python - <<'PY'
+          from importlib.metadata import version
+          from pathlib import Path
+          import reliable_messaging
+          assert version('fangcun-reliable-messaging') == '0.1.0a1'
+          assert (Path(reliable_messaging.__file__).parent / 'py.typed').is_file()
+          PY
+      - name: Bind candidate assets to their exact source
+        run: |
+          uv run python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          assets = sorted([*Path('dist').glob('*.whl'), *Path('dist').glob('*.tar.gz')])
+          if len(assets) != 2:
+              raise SystemExit('Expected one wheel and one source archive')
+          review = {'source': os.environ['GITHUB_SHA'], 'formally_published': False,
+                    'assets': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in assets}}
+          Path('artifact-review.json').write_text(json.dumps(review, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m7-python-${{ matrix.python }}-mysql-${{ matrix.mysql }}
+          path: |
+            python/results.xml
+            python/dist/*
+            python/artifact-review.json
+          if-no-files-found: error
