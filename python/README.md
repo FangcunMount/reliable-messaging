@@ -1,7 +1,9 @@
-# Python minimal SDK (M7 candidate)
+# Python minimal SDK (M7)
 
 Independent distribution `fangcun-reliable-messaging`, import `reliable_messaging`,
-candidate version `0.1.0a1`. This version is not a formal release. Python 3.11–3.13,
+version `0.1.0a1`, published as the independent GitHub prerelease
+[`python/v0.1.0a1`](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.1.0a1)
+from source `fea92389967076e3529289e80b1d96abef76dc73`. Python 3.11–3.13,
 SQLAlchemy 2.0 async; no dependency on host repositories or the Go runtime.
 
 Supported scope: immutable message identity/fingerprint, durable result acknowledgement
@@ -90,5 +92,6 @@ No real model calls, candidate activation, production access or Go acceptance re
 
 Run from python/: `PYTHONPATH=src pytest -m 'not integration'`; for real storage,
 set a disposable `RM_M7_MYSQL_URL` and run `PYTHONPATH=src pytest -m integration`.
-Use `uv build` for independent wheel/sdist. Formal Python publication and qs-ai
-production cutover require separate review of fixed artifact hashes, CI and rollback.
+Use `uv build` for independent wheel/sdist. The existing prerelease assets are fixed;
+building the current checkout does not authorize replacing them. Future Python releases
+and production changes require separate review of fixed artifact hashes, CI and rollback.

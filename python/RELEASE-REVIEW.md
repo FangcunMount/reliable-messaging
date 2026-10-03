@@ -1,6 +1,22 @@
 # M7 independent Python release review
 
-This is a review candidate, not a published Python version or Go milestone acceptance.
+## Current publication record
+
+The project initiator approved publication, and the independent GitHub prerelease
+[`python/v0.1.0a1`](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.1.0a1)
+was published from `fea92389967076e3529289e80b1d96abef76dc73`.
+Final Python CI run `37092771662` passed both required combinations with 22 tests each
+and no failures, errors or skips. Published assets were downloaded and verified:
+
+- Wheel SHA256: `5699421a213a6824cb39f13dc9b10c562693137670a071077ba5e50e687fec9e`.
+- Source archive SHA256: `9bac3753405ad0c3eee3c0b5e938941c6b8aed2445a5b4268f5ff68d9e8b635b`.
+
+The tag and assets must not be replaced. Publication is not Go milestone acceptance.
+The following sections preserve the original pre-publication review and constraints.
+
+## Original review
+
+This was a review candidate, not a published Python version or Go milestone acceptance.
 Source baseline: Go repository 5323413ddb191a17fa2a43a261b01c0808c34292.
 Distribution/import: fangcun-reliable-messaging / reliable_messaging, 0.1.0a1.
 Planned destination: GitHub Release, prerelease tag `python/v0.1.0a1`.
