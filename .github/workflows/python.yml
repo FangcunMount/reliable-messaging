@@ -91,6 +91,17 @@ jobs:
           from reliable_messaging.protected import Context
           assert NSQPublisher('127.0.0.1:4150')._client is None
           PY
+      - name: Run required acceptance against the installed wheel
+        run: |
+          uv pip install --python .wheel-smoke/bin/python pytest==9.1.1 pytest-asyncio==1.4.0 asyncmy==0.2.14
+          .wheel-smoke/bin/python -m pytest -q --junitxml=wheel-results.xml
+          .wheel-smoke/bin/python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('wheel-results.xml').getroot()
+          cases = list(root.iter('testcase'))
+          if not cases or any(list(root.iter(k)) for k in ('skipped', 'error', 'failure')):
+              raise SystemExit('Required installed-wheel acceptance is empty or unsuccessful')
+          PY
       - name: Bind candidate assets to their exact source
         run: |
           uv run --locked --extra nsq python - <<'PY'
@@ -109,6 +120,7 @@ jobs:
           name: python-${{ matrix.python }}-mysql-${{ matrix.mysql }}
           path: |
             python/results.xml
+            python/wheel-results.xml
             python/dist/*
             python/artifact-review.json
           if-no-files-found: error

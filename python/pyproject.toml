@@ -23,7 +23,7 @@ build-backend = "hatchling.build"
 packages = ["src/reliable_messaging"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["results.xml"]
+exclude = ["results.xml", "wheel-results.xml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
