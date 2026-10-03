@@ -39,9 +39,7 @@ class TransactionAppender:
     async def validate(self) -> None:
         """Verify the real MySQL driver's transaction mode, not just ORM bookkeeping."""
         self._check()
-        connection = (
-            await self._db.connection() if isinstance(self._db, AsyncSession) else self._db
-        )
+        connection = await self._db.connection() if isinstance(self._db, AsyncSession) else self._db
         if connection.dialect.name != "mysql":
             raise TransactionBindingError("minimal appender supports MySQL async transactions only")
         raw = await connection.get_raw_connection()
