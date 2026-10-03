@@ -1,6 +1,6 @@
 //go:build integration
 
-package mysql
+package ackbudget
 
 import (
 	"context"
@@ -11,12 +11,13 @@ import (
 	"testing"
 	"time"
 
+	outbox "github.com/FangcunMount/reliable-messaging/delivery/mysql"
 	driver "github.com/go-sql-driver/mysql"
 )
 
 // This new adapter-only fixture uses an explicitly supplied disposable schema.
 // It does not invoke the original Go M0-M6 acceptance scripts or any business host.
-func ackBudgetFixture(t *testing.T) (*sql.DB, *Outbox, Identity) {
+func ackBudgetFixture(t *testing.T) (*sql.DB, *outbox.Outbox, outbox.Identity) {
 	t.Helper()
 	dsn := os.Getenv("RM_MQ_DURABLE_TEST_DSN")
 	if dsn == "" {
@@ -41,7 +42,7 @@ func ackBudgetFixture(t *testing.T) (*sql.DB, *Outbox, Identity) {
 			t.Error("host test pool close failed")
 		}
 	})
-	ddl, err := os.ReadFile("schema.sql")
+	ddl, err := os.ReadFile("../../../delivery/mysql/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,11 +50,11 @@ func ackBudgetFixture(t *testing.T) (*sql.DB, *Outbox, Identity) {
 		t.Fatal("required isolated adapter schema could not be created")
 	}
 	created = true
-	store, err := New("rm_durable_outbox")
+	store, err := outbox.New("rm_durable_outbox")
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := Identity{"qs-server", "qs-ai", "original-final-ack"}
+	id := outbox.Identity{Producer: "qs-server", Destination: "qs-ai", MessageID: "original-final-ack"}
 	_, err = db.Exec(`INSERT INTO rm_durable_outbox
  (producer,destination,message_id,body_sha256,body,wire,topic,aggregate_key,aggregate_sequence,ordered,requires_receipt,stage,attempts,available_at,created_at)
  VALUES(?,?,?,'original-hash',?,?, 'qs.ai.acks.v1','original',1,0,0,'staged',0,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, id.Producer, id.Destination, id.MessageID, []byte("original body"), []byte("original saved wire"))
