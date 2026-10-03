@@ -1,0 +1,62 @@
+name: Python M7
+on:
+  push:
+    branches: [main, codex/m7-python-sdk]
+    paths: ['python/**', '.github/workflows/python.yml']
+  pull_request:
+    paths: ['python/**', '.github/workflows/python.yml']
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: '3.11'
+            mysql: '8.0.36'
+          - python: '3.13'
+            mysql: '8.4'
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_DATABASE: rm_m7
+          MYSQL_USER: m7
+          MYSQL_PASSWORD: m7_disposable_only
+          MYSQL_ROOT_PASSWORD: m7_root_disposable_only
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pm7_root_disposable_only --silent"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+    defaults:
+      run:
+        working-directory: python
+    env:
+      TZ: Asia/Shanghai
+      RM_M7_MYSQL_URL: mysql+asyncmy://m7:m7_disposable_only@127.0.0.1:3306/rm_m7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.13'
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.12'
+          cache: false
+      - run: uv sync --locked
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy src
+      - name: Contract, original transaction and process recovery
+        run: uv run pytest -q --junitxml=results.xml
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m7-python-${{ matrix.python }}-mysql-${{ matrix.mysql }}
+          path: |
+            python/results.xml
+            python/dist/*
