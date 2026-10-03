@@ -4,3 +4,6 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 dist/
+.wheel-smoke/
+artifact-review.json
+results.xml

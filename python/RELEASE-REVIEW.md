@@ -3,6 +3,9 @@
 This is a review candidate, not a published Python version or Go milestone acceptance.
 Source baseline: Go repository 5323413ddb191a17fa2a43a261b01c0808c34292.
 Distribution/import: fangcun-reliable-messaging / reliable_messaging, 0.1.0a1.
+Planned destination: GitHub Release, prerelease tag `python/v0.1.0a1`.
+Do not create or replace the tag or upload formal assets before the project
+initiator approves the exact source, terminal CI and asset checksums.
 
 ## Scope and evidence
 
@@ -22,7 +25,8 @@ Distribution/import: fangcun-reliable-messaging / reliable_messaging, 0.1.0a1.
 - Local storage runs: MySQL 8.0.44 with SQLAlchemy 2.0.52; a second fully separate native
   MySQL 9.3 with SQLAlchemy 2.0.54. Native 9.3 is supplemental, not target-version proof.
   The independent workflow tests Python 3.11/MySQL 8.0.36 and Python 3.13/MySQL 8.4;
-  its terminal results must be checked before treating those combinations as verified.
+  both combinations passed at 82ce922 (run 37090106558). That is previous-source
+  evidence; subsequent candidate changes need their own terminal CI record.
 - Ruff format/lint and mypy passed. Independent wheel/sdist built locally; exact
   candidate source/artifact hashes belong in the M7 evidence record. A release must
   bind its own exact CI artifact hashes, not reuse an unrelated build.
@@ -46,7 +50,19 @@ availability and release destination; explicitly authorize formal Python publica
 Before production adoption: replace a temporary immutable Git source pin with the
 approved published wheel/index version; rebuild the normal qs-ai image from fixed
 source and lockfile, verify no Git tooling is required in the runtime build, and
-review signed artifact/config/rollback evidence. No Git checkout paths enter runtime.
+review exact artifact/config/rollback evidence. No artifact signature is claimed by
+this candidate; source identity, CI identity and SHA256 are recorded separately.
+No Git checkout paths enter runtime.
+
+The wheel must install in a separate environment, expose version 0.1.0a1 and include
+py.typed. CI reports must contain actual test cases, with zero failures, errors or
+skips; missing dependencies fail the required integration. Both matrix artifacts
+must bind the same final source and match their wheel/source archive checksums.
+
+The published URL is fixed to the tagged GitHub Release asset, never latest or a
+branch URL. Keep its hash in the host lockfile. GitHub assets can technically be
+replaced: the release policy forbids replacement, and a changed hash must fail
+installation. This prerelease does not add a license or publish to PyPI.
 
 Retain the previous qs-ai image/config. Stop result admission and drain the old
 single-process service before starting the new one. The database schema and gRPC
@@ -54,3 +70,9 @@ identity stay unchanged, so the old image can read undelivered rows if rolled ba
 Do not discard pending rows or change accepted tasks, model bindings, candidate mode,
 capacity or recovery authorizations during cutover. Production acceptance and original
 qs-ai execution-owner approval remain separate from local SDK proof.
+
+qs-ai currently enables automatic deployment on main. Treat its main merge as part
+of the production approval, not a preparatory code-only operation. Do not change
+deployment switches to work around this gate. Original qs-ai/qs-server owners must
+provide their approved source/build and execution-recovery evidence; Python CI does
+not run or sign off Go M0-M6 acceptance.
