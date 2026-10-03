@@ -168,6 +168,49 @@ async def test_lost_final_ack_rearms_original_wire_without_ack_of_ack(storage):
         assert len(await store.pending(db)) == 1
 
 
+async def test_successful_final_ack_replays_do_not_spend_failure_budget(storage):
+    _, sessions, table = storage
+    store = MySQLDurableOutbox(table)
+    async with sessions.begin() as db:
+        await append(db, table, receipt=False)
+        await store.retry(db, ID, HASH, delay_seconds=1)
+        await store.retry(db, ID, HASH, delay_seconds=1)
+    original = await row(sessions, table)
+    assert original["attempts"] == 2
+    for _ in range(16):
+        async with sessions.begin() as db:
+            await store.published(db, ID, HASH)
+        published = await row(sessions, table)
+        assert published["stage"] == CONFIRMED and published["attempts"] == 2
+        assert published["wire"] == WIRE and published["body"] == BODY
+        assert published["created_at"] == original["created_at"]
+        async with sessions.begin() as db:
+            await store.rearm_ack(db, ID, HASH)
+    async with sessions.begin() as db:
+        await store.retry(db, ID, HASH, delay_seconds=1)
+    assert (await row(sessions, table))["attempts"] == 3
+
+
+async def test_final_ack_hold_survives_duplicate_without_new_budget(storage):
+    _, sessions, table = storage
+    store = MySQLDurableOutbox(table)
+    async with sessions.begin() as db:
+        await append(db, table, receipt=False)
+        for _ in range(8):
+            await store.retry(db, ID, HASH, delay_seconds=1)
+        await store.hold(db, ID, HASH, error_code="delivery_budget_exhausted")
+    before = await row(sessions, table)
+    async with sessions.begin() as db:
+        await store.rearm_ack(db, ID, HASH)
+        await store.published(db, ID, HASH)
+    after = await row(sessions, table)
+    assert after["stage"] == HELD and after["attempts"] == 8
+    assert after["error_code"] == before["error_code"]
+    assert after["wire"] == before["wire"] and after["body"] == before["body"]
+    async with sessions.begin() as db:
+        assert await store.pending(db) == []
+
+
 async def test_go_and_python_share_durable_states_and_restart_scan(storage, tmp_path):
     engine, sessions, table = storage
     async with sessions.begin() as db:

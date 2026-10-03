@@ -76,3 +76,26 @@ original transaction and process tests, both-language codecs, and installed-whee
 checks. Test/CI success is distinct from release, normal host-image health and business
 acceptance. Current supported candidate combinations are defined by the workflow;
 no other Python/client/Broker/database combination is implied.
+
+## Persistent final ACK budget (0.2.0a2 candidate)
+
+Receipt-free final ACKs end at broker PUB OK. A successful replay of that same
+ACK retains its original identity, body, wire and retry counter; it does not
+consume a failed-publication budget. `retry` still counts every uncertain or
+failed PUB. Receipt-required commands/events keep their existing bounded
+unconfirmed-delivery counting and still require authenticated business receipts.
+
+A duplicate committed event cannot rearm an ACK already in technical `held`.
+The host must keep that hold, counter and reason until its reviewed governance
+process authorizes disposition. The SDK never resets a counter, reconstructs a
+message or grants model/business retry permission. Historical counters from the
+previous prerelease may include successful ACK PUBs; this patch cannot infer
+which old increments were failures and does not normalize or automatically
+resume those records. No schema, Go public interface, existing wire or golden
+sample changes are required.
+
+New real-MySQL tests in both languages replay one saved ACK sixteen times after
+two uncertain PUBs, proving the counter remains two and the next uncertainty
+becomes three. They separately verify an eight-failure hold survives duplicates
+and late success callbacks. These are adapter proofs, not production business
+acceptance or original Go M0–M6 signoff.
