@@ -44,6 +44,8 @@ jobs:
       RM_MQ_NSQ_HTTP: http://127.0.0.1:4151
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.12.13'
@@ -128,13 +130,20 @@ jobs:
       - name: Bind candidate assets to their exact source
         run: |
           uv run --locked --extra nsq python - <<'PY'
-          import hashlib, json, os
+          import hashlib, json, subprocess
           from pathlib import Path
           assets = sorted([*Path('dist').glob('*.whl'), *Path('dist').glob('*.tar.gz')])
           if len(assets) != 2:
               raise SystemExit('Expected one wheel and one source archive')
-          review = {'source': os.environ['GITHUB_SHA'], 'formally_published': False,
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          tree = subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip()
+          review = {'source': source, 'source_tree': tree, 'formally_published': False,
                     'assets': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in assets}}
+          import tarfile
+          archive = next(p for p in assets if p.name.endswith('.tar.gz'))
+          with tarfile.open(archive) as source_archive:
+              if any(p.endswith(('results.xml', 'wheel-results.xml', 'ack-budget-go.json', 'artifact-review.json')) for p in source_archive.getnames()):
+                  raise SystemExit('Source archive contains generated acceptance output')
           Path('artifact-review.json').write_text(json.dumps(review, indent=2) + '\n')
           PY
       - uses: actions/upload-artifact@v4
