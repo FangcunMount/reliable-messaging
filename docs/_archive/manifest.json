@@ -1,0 +1,109 @@
+{
+  "source_commit": "fd06495ca819124c73ffe31b20a5381c06885e87",
+  "migration_date": "2026-10-06",
+  "changes": "Only relative Markdown link destinations adjusted for relocation; statements and results preserved.",
+  "documents": [
+    {
+      "original_path": "docs/m2-review.md",
+      "original_sha256": "c0bcca07a1a854ecbe7080f6f51f01d8a91b2ce677b3473df937dbda74be4988",
+      "archive_path": "docs/_archive/milestones/m2-review.md",
+      "archive_sha256": "c0bcca07a1a854ecbe7080f6f51f01d8a91b2ce677b3473df937dbda74be4988"
+    },
+    {
+      "original_path": "docs/m2-evidence.md",
+      "original_sha256": "1d6c9f0e919067ad0ca1284036bffa351d3ada288a65cb865d640c570fa88a8b",
+      "archive_path": "docs/_archive/milestones/m2-evidence.md",
+      "archive_sha256": "1d6c9f0e919067ad0ca1284036bffa351d3ada288a65cb865d640c570fa88a8b"
+    },
+    {
+      "original_path": "docs/m2-fault-matrix.md",
+      "original_sha256": "37d027a3a2bb4f8f84e4e293470b4fa6c6fb4160f249077bab9fa9f6cae1b9d4",
+      "archive_path": "docs/_archive/milestones/m2-fault-matrix.md",
+      "archive_sha256": "37d027a3a2bb4f8f84e4e293470b4fa6c6fb4160f249077bab9fa9f6cae1b9d4"
+    },
+    {
+      "original_path": "docs/m2-acceptance-gaps.md",
+      "original_sha256": "0b1bdd6dcdd4a410cb8b9a73764f784e57aa55f38300437f94297bbc33523235",
+      "archive_path": "docs/_archive/milestones/m2-acceptance-gaps.md",
+      "archive_sha256": "0b1bdd6dcdd4a410cb8b9a73764f784e57aa55f38300437f94297bbc33523235"
+    },
+    {
+      "original_path": "docs/compatibility.md",
+      "original_sha256": "4e5c74151870cd7f4d9ed6293592fbd3ffd88b0ae53a2fb7107de5d59f4aa598",
+      "archive_path": "docs/_archive/milestones/compatibility.md",
+      "archive_sha256": "78604ded54b0ec292d79b9779d217a215a24029189baea3d00d4928f86a60537"
+    },
+    {
+      "original_path": "docs/signaling-retirement.md",
+      "original_sha256": "1d220fd1dc82f588a4f17e0c1bb42fa7019ca063a919eaf597301494bcc007ae",
+      "archive_path": "docs/_archive/milestones/signaling-retirement.md",
+      "archive_sha256": "1d220fd1dc82f588a4f17e0c1bb42fa7019ca063a919eaf597301494bcc007ae"
+    },
+    {
+      "original_path": "docs/ai-mq-candidate.md",
+      "original_sha256": "13462de94cc25aa33a9ad78765911a8c0049d2af2074e66e638aa3c77cd58fad",
+      "archive_path": "docs/_archive/milestones/ai-mq-candidate.md",
+      "archive_sha256": "13462de94cc25aa33a9ad78765911a8c0049d2af2074e66e638aa3c77cd58fad"
+    },
+    {
+      "original_path": "docs/status.md",
+      "original_sha256": "4951284f27af8db0b1d25b8c4b6dacbb73a5c5c1575c3c47047f15ac603b50a4",
+      "archive_path": "docs/_archive/milestones/status.md",
+      "archive_sha256": "2ceb977d68b072bf4fcce34e918bfbb8f45dac00dd27fcf24631587939c1bd70"
+    },
+    {
+      "original_path": "README.md",
+      "original_sha256": "467cad81f22c7a774906aac60d228beb269d413c3ad1e9bd9b0c9157081248b1",
+      "archive_path": "docs/_archive/milestones/root-readme-20261003.md",
+      "archive_sha256": "3a9038b7c5d1b692f7cc052352426141f7c536ab454e06e4ce2006ad2cf4e7aa"
+    },
+    {
+      "original_path": "python/RELEASE-REVIEW.md",
+      "original_sha256": "5394039f25e4307544505f53fcd339d4d64faaa0017a0cb03941fd3b9a012d30",
+      "archive_path": "docs/_archive/milestones/python-release-review.md",
+      "archive_sha256": "5394039f25e4307544505f53fcd339d4d64faaa0017a0cb03941fd3b9a012d30"
+    },
+    {
+      "original_path": "examples/README.md",
+      "original_sha256": "c05e4ee225c3850580ebb426fccefde4cd139c3fd5349fbccb8e704fbc3ea4f8",
+      "archive_path": "docs/_archive/milestones/examples-m1-readme.md",
+      "archive_sha256": "c05e4ee225c3850580ebb426fccefde4cd139c3fd5349fbccb8e704fbc3ea4f8"
+    },
+    {
+      "original_path": "contracts/README.md",
+      "original_sha256": "95babcf1339ea56acd401e0279a5cf220cc888eb77f8853d193aadad02e3e4f8",
+      "archive_path": "docs/_archive/milestones/contracts-README.md",
+      "archive_sha256": "95babcf1339ea56acd401e0279a5cf220cc888eb77f8853d193aadad02e3e4f8"
+    },
+    {
+      "original_path": "storage/mysql/README.md",
+      "original_sha256": "271738352e66020ccd9897c0ded5bb60c44fe18e13d63700d9ff845eaa09fd8b",
+      "archive_path": "docs/_archive/milestones/storage-mysql-README.md",
+      "archive_sha256": "271738352e66020ccd9897c0ded5bb60c44fe18e13d63700d9ff845eaa09fd8b"
+    },
+    {
+      "original_path": "storage/mongo/README.md",
+      "original_sha256": "5db06b7befa2b319177aa352ee89d5b257c652268393c48c14412dc141cc6e02",
+      "archive_path": "docs/_archive/milestones/storage-mongo-README.md",
+      "archive_sha256": "5db06b7befa2b319177aa352ee89d5b257c652268393c48c14412dc141cc6e02"
+    },
+    {
+      "original_path": "transport/nsq/README.md",
+      "original_sha256": "22770188ff27ee9a80b80a0239973cbbb84a082ee88e63076e24290273e0a7d4",
+      "archive_path": "docs/_archive/milestones/transport-nsq-README.md",
+      "archive_sha256": "22770188ff27ee9a80b80a0239973cbbb84a082ee88e63076e24290273e0a7d4"
+    },
+    {
+      "original_path": "python/README.md",
+      "original_sha256": "41a95798533be3339ca8de813612932ab9db41d515ba7d1daf6413e6d31cbd4e",
+      "archive_path": "docs/_archive/milestones/python-README.md",
+      "archive_sha256": "0b88a98da31bbd6e423da92555ae680b421f9b78d743b0ac454a7ae57ca571d2"
+    },
+    {
+      "original_path": "python/NSQ.md",
+      "original_sha256": "0fc73378ba84f3b74e0da1a8a1acbf6890f0bbfe01253679c32461acadf738d2",
+      "archive_path": "docs/_archive/milestones/python-NSQ.md",
+      "archive_sha256": "0fc73378ba84f3b74e0da1a8a1acbf6890f0bbfe01253679c32461acadf738d2"
+    }
+  ]
+}
