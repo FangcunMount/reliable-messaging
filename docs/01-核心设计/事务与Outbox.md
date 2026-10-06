@@ -171,7 +171,7 @@ Go 和 Python 都要求宿主提供原事务；结算先锁定行并核对完整
 
 held 也拒绝这类迟到回调及重复 ACK rearm。可是若 held 后收到认证核验通过的原业务回执，Confirm 仍可以结案；因为这证明旧任务已经持久接受，而不是批准再次执行。SDK 的 Confirm 不替宿主认证，调用前必须完成身份、摘要、阶段与准入校验。
 
-receipt-free 的最终 ACK 在 PUB OK 后 confirmed。成功的重复 ACK 发布不消耗其持久失败预算，失败／不确定 PUB 才增加 attempts；需要业务回执的消息则按尚未确认的投递次数累计。rearm_ack 只重新通知同一 ACK，不重建 body/wire、不重置预算，也不授权重跑模型任务。
+receipt-free 的最终 ACK 在 PUB OK 后 confirmed。成功的重复 ACK Published 不增加 attempts；失败／不确定 PUB 经 Retry 结算才增加，Hold 本身不增加。需要业务回执的消息按尚未确认的投递规则累计。rearm_ack 只重新通知同一 ACK，不重建 body/wire、不重置预算，也不授权重跑模型任务。
 
 ### 顺序依靠原业务序列，不依靠队列到达时间
 
