@@ -1,111 +1,225 @@
 # Python 接入
 
-Python 分发包名为 `fangcun-reliable-messaging`，导入名为 `reliable_messaging`。它不依赖 Go runtime 或宿主仓库。本文解释当前源码的 Python 合同和接线；制品来源、已发布版本及候选范围见[发布索引](../releases/README.md)。
+Python 接入有两条合同，不能合成一个与 Go 标准 Store 完全对称的接口：0.1 核心绑定宿主原事务和已有 pending/delivered 表，0.2 增加可选 NSQ、protected wire 与回执型 Outbox。它们都保留宿主事务和单进程运行归属，但没有 Go 标准租约 Store 的跨进程领取与 fencing。
 
-Python 0.1 的核心是绑定原 SQLAlchemy 事务、适配宿主已有 pending/delivered 表，以及核对原事件的持久业务回执。0.2 源码在此基础上增加可选 NSQ、protected wire 和独立回执型 Outbox。它们共享消息身份和部分确认分类，**不共享 Go 租约 Store 的表结构、多进程领取与 fencing 合同**。
+本篇先沿 qs-ai 的真实“状态已持久生成 → QS 接受原通知 → 原通知结算”链路解释 0.2，再给 0.1 原表配方。消息恢复只重投原通知，不重建任务、替换冻结配置或重做结果未知的模型调用。
 
-## 安装与支持范围
+## 安装的包与支持环境
 
-固定所选发布版本，安装方式见 [Python 包入口](../../python/README.md)。NSQ 部分需 `nsq` extra。当前源码要求 Python 3.11～3.13、SQLAlchemy 2.0 async；NSQ extra 的精确依赖由 [`pyproject.toml`](../../python/pyproject.toml) 决定。
+分发名为 `fangcun-reliable-messaging`，导入名为 `reliable_messaging`，不依赖 Go runtime。当前源码要求 Python 3.11～3.13、SQLAlchemy 2.0 async；NSQ extra 固定 pynsq、Tornado 和 jwcrypto，详见 [pyproject.toml](../../python/pyproject.toml)。asyncmy 是当前验证的 MySQL driver，由宿主选择并安装，不是 SDK 自动创建的数据库连接。
 
-| 合同 | 使用位置 | 限制 |
-|---|---|---|
-| 0.1 核心：`Message`、原事务 appender | `message.py`、`sqlalchemy.py` | MySQL、能验证非 autocommit 的原 async 事务；asyncmy 是已测试驱动 |
-| 0.1 核心：原 pending/delivered 适配 | `MySQLPendingOutbox` | 宿主已有表、单进程、接收端重复安全；无租约领取/隔离状态 |
-| 0.1 核心：业务回执结算 | `deliver_durable` | callback 必须验证原 event_id 的持久回执，不得替换为 Broker PUB 结果 |
-| 0.2 源码：NSQ 与 protected wire | `nsq.py`、`wire.py`、`protected.py` | 显式 nsqd；不实现动态 lookupd 发现；宿主提供密钥与鉴权 |
-| 0.2 源码：回执型 Outbox | `MySQLDurableOutbox` | 独立宿主表；原事务内扫描/结算；顺序、回执和 hold 与 Go 标准 Store 分开 |
-
-上述范围说明实现合同，不从版本号或本地构建推断远端包已发布或生产已采用。
-
-## 原 SQLAlchemy 事务
-
-`bind` 固定当前事务和 savepoint；`append` 只接受宿主定义的 INSERT。宿主负责表、列值和重复身份策略，不由这个 appender 编码业务消息或建立 schema。
-
-```python
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.dml import Insert
-
-from reliable_messaging.sqlalchemy import bind
-
-
-async def write_intent(
-    db: AsyncSession, business_insert: Insert, outbox_insert: Insert
-) -> None:
-    async with db.begin():
-        await db.execute(business_insert)
-        await bind(db).append(outbox_insert)
-```
-
-这段函数由宿主开始和提交事务；已有事务中的调用方只在其原 scope 内 `await bind(db).append(...)`，不要再嵌套一个新的顶层事务。因宿主此前操作而 autobegin 的事务也可绑定，但 bind/append 本身不会建立事务。
-
-SQLAlchemy 的逻辑 begin 不足以证明原子性：adapter 还要求实际 MySQL 驱动提供 `get_autocommit` 且返回 false。AUTOCOMMIT、非 MySQL、缺少可核验方法、结束事务或更换 savepoint 都被拒绝。Append 失败或取消时宿主须回滚；SDK 不 commit/rollback/close，也不 dispose pool。源码见 [`sqlalchemy.py`](../../python/src/reliable_messaging/sqlalchemy.py)。
-
-## 0.1 原表适配与持久回执
-
-`MySQLPendingOutbox(host_table)` 借用宿主已有的 event_id/payload/delivered/attempts/available_at/delivered_at 表。它按数据库 UTC 时钟扫描；`delivered` 与 `retry` 要求显式活动事务，并由宿主提交。原消息 RFC3339 字符串不改写，UTC+8 是业务与运维显示规范。
-
-`deliver_durable` 接受三个参数：原 event_id、提供 `delivered(event_id)`/`retry(event_id)` 的宿主 store，以及无参数的异步 accept callback。`MySQLPendingOutbox` 的方法还需 db 参数，因此应由宿主提供 store 包装，包装在每次结算时进入宿主事务。不要把它直接作为省略事务的 ResultStore。
-
-```python
-from collections.abc import Awaitable, Callable
-
-from reliable_messaging import DeliveryResult, deliver_durable
-from reliable_messaging.delivery import ResultStore
-
-
-async def settle_original(
-    event_id: str,
-    host_store: ResultStore,
-    verify_original_receipt: Callable[[], Awaitable[None]],
-) -> DeliveryResult:
-    return await deliver_durable(event_id, host_store, verify_original_receipt)
-```
-
-`verify_original_receipt` 只有在验证业务接收端已持久接单，并核对原 event_id 后才能返回。HTTP/gRPC 请求发送成功或 NSQ PUB OK 不够；Broker `DeliveryResult` 作为 callback 返回值会被拒绝。
-
-回执确认后才调用 store.delivered；异常调用 store.retry，未知结果保留原通知并返回 Unknown；显式 `DeliveryRejected` 返回 Rejected。取消传播且不结算；结算失败传播到宿主监督层，不重新解释为接收端失败。重投对象是已存在的原通知，不能据此重新运行模型、替换冻结配置或重新创建任务。源码与反例见 [`delivery.py`](../../python/src/reliable_messaging/delivery.py)、[结算测试](../../python/tests/test_delivery.py)。
-
-## 循环与停止
-
-若宿主没有扫描循环，可以显式使用 `PeriodicRelay`：
-
-```python
-from collections.abc import Awaitable, Callable
-
-from reliable_messaging import PeriodicRelay
-
-
-async def serve_results(attempt: Callable[[], Awaitable[int]]) -> None:
-    relay = PeriodicRelay(attempt, poll_seconds=1, shutdown_seconds=5)
-    await relay.start()
-    try:
-        await relay.wait()
-    finally:
-        await relay.stop()
-```
-
-`attempt` 负责扫描和处理已提交意图；示例时间只是接线参数。构造不创建 task；start 才在宿主共享 asyncio loop 上运行。notify 是可丢失的提交后提示，周期扫描与重启扫描仍必须成立。wait/stop 会暴露扫描失败。
-
-停止先结束新接纳并等待当前 attempt，超过预算后取消并抛 TimeoutError。callback 必须支持合作取消；Stop 超时不代表业务已经完成。宿主在循环与发送方实际排空后再关闭自己的数据库、channel 和其他资源。已有单进程 supervisor/polling loop 的 qs-ai 可继续使用原循环，不必叠加第二个 Relay。
-
-## 0.2 NSQ 与回执型 Outbox
-
-NSQ 是可选传输。Publisher/Subscriber 构造无 I/O；宿主在原事件循环内显式 await start，先启动 Publisher 再启动 Subscriber。Subscriber 借用按 source nsqd 地址配置的 Publisher，要求逐节点 `failure_ready`，并在处理前确认持久失败 channel 就绪。关闭先停止接纳和 Subscriber，再停止 Publisher，最后关闭池；不能引入 `nsq.run`、另一个 loop、进程或线程。详细驱动与故障合同见 [Python NSQ 包入口](../../python/NSQ.md)。
-
-NSQ handler 必须在业务/Inbox/回执 Outbox 提交后返回。failed_handler 先持久保存失败/hold；invalid_handler 用原 wire hash 隔离未经认证的字节，不能相信其宣称的消息 ID。Broker 失败或超时没有业务重试授权。
-
-`MySQLDurableOutbox` 使用 [`delivery/mysql/schema.sql`](../../delivery/mysql/schema.sql) 所描述的另一类表，不是原 pending/delivered 表或 Go `rm_outbox`。宿主通过原事务 INSERT 意图；扫描与 Published/Retry/Confirm/Hold/RearmAck 都借用活动非 autocommit 事务。需业务回执的行 PUB 后等待回执，只能由宿主核验已认证回执后 Confirm。receipt-free final ACK 的 Broker 确认按自身合同结束，没有 ack-of-ack。
-
-`rearm_ack` 仅用于可重发的原 final ACK；原身份、wire 和失败预算保持不变，技术 held 不自动复活。成功的 ACK PUB 不消耗失败预算，未知/失败 PUB 仍计数；旧版计数不能推断或自动归一。持久行、业务顺序、未知模型调用、已接单任务和原冻结配置的恢复均由宿主权威记录决定。见[事务与 Outbox](../01-核心设计/事务与Outbox.md)、[宿主接入边界](宿主接入边界.md)。
-
-## 核验入口
-
-在 `python/` 下先准备锁定依赖，再运行无集成测试：
+开发当前源码可在 python 目录执行：
 
 ```sh
 uv sync --locked --extra nsq
 uv run --locked --extra nsq pytest -m 'not integration'
 ```
 
-原事务/进程恢复集成需要一次性 MySQL；NSQ 测试需要一次性 NSQ 与部分 Docker 场景，缺少必需依赖必须失败。环境变量和作业矩阵见 [Python workflow](../../.github/workflows/python.yml)、[测试与故障验证](../03-维护与验证/测试与故障验证.md)。包构建、installed-wheel 核验、宿主部署、真实业务验收分别证明各自范围；无真实模型调用是隔离测试的边界，不是生产业务结论。
+宿主使用经过核验的固定版本和制品，安装方式见 [Python README](../../python/README.md)。GitHub wheel／sdist 和摘要见[发布索引](../releases/README.md)；本地源码测试、wheel 测试和宿主依赖固定是三种证据，不能根据 pyproject 版本推断生产已经采用。
+
+## qs-ai 实际怎样持久生成一条通知
+
+固定源码 [bd5e18e](https://github.com/FangcunMount/qs-ai/tree/bd5e18ed4659d1d9d5ab853255577139df173aff) 已固定 Python 0.2.0a2；这是源码接入事实，不是本轮生产采集。
+
+当 Session 状态更新时，[MySQLUnitOfWork.save](https://github.com/FangcunMount/qs-ai/blob/bd5e18ed4659d1d9d5ab853255577139df173aff/src/qs_ai/infrastructure/persistence/mysql/interpretation.py) 先更新 Session，再调用 stage_state：
+
+```mermaid
+flowchart TD
+  Session[原Session状态／持久Artifact] --> Tx[宿主原MySQL事务]
+  Tx --> Result[追加原result_outbox事件]
+  Result --> First[按session_id＋version复用第一条事件]
+  First --> Prepare[MQ启用时准备原Body和首次protected wire]
+  Prepare --> MQ[同事务追加回执型消息]
+  MQ --> Commit[宿主Commit]
+  Commit --> Step[宿主单个MQRelay.step扫描原wire]
+```
+
+[result_outbox](https://github.com/FangcunMount/qs-ai/blob/bd5e18ed4659d1d9d5ab853255577139df173aff/src/qs_ai/infrastructure/persistence/mysql/result_outbox.py) 的 session/version 唯一约束让重复状态保存复用第一条事件；COMPLETED 必须先有持久 Artifact。SDK bind(db).append 只是将宿主定义的 INSERT 放进原事务，未替宿主制定这些业务约束。
+
+MQ recorder 读回已保存的原事件，准备确定的业务 Body 和首次 protected wire，交给宿主 MessagingStore.stage。该方法在同一事务 INSERT，锁定原行并核对原 Body、摘要和业务身份，重复身份不覆盖第一份 wire。自动编码、原结果匹配和冻结事实的检查都在宿主接缝，不是 SQLAlchemy appender 隐含完成的功能。
+
+## PUB 后为什么仍为 awaiting_receipt
+
+宿主 [MQRelay.step](https://github.com/FangcunMount/qs-ai/blob/bd5e18ed4659d1d9d5ab853255577139df173aff/src/qs_ai/infrastructure/workflow_transport/mq_relay.py) 使用进程内互斥门：
+
+1. 在短读事务扫描最多20行，到期顺序由回执型 Store 约束。
+2. 结束读 session，用保存的原 wire 发送 NSQ。
+3. 打开另一笔宿主事务，根据结果调用 published、retry 或 hold。
+4. 提交后等待原业务回执；到期仍可发送同一 wire。
+
+只有结果同时为 CONFIRMED 和 BROKER，才调用 published。requires_receipt=true 的行从 staged 进入 awaiting_receipt，不能因 PUB OK 就变 confirmed；Rejected 的 hold、Unknown 的技术延迟由宿主策略决定。
+
+这条循环没有 Go claim/token/lease，进程内门也不能推广为多进程保障。当前 qs-ai 保持单服务、单容器、单进程；若以后扩展多执行者，必须另设计领取和栅栏，不能仅增加容器副本。
+
+```text
+业务结果已经持久提交
+→ 原消息 staged
+→ PUB OK
+→ awaiting_receipt
+→ 收到 QS 已认证、匹配原身份／BodySHA 的 STORED 回执
+→ 原消息 confirmed，并结算对应原 result_outbox
+```
+
+最后一步的结束点是“QS 已持久接受该通知”。它不自动证明报告已在小程序展示，也不授予模型再执行权限。
+
+## 原业务 ACK 怎样与原结果原子结算
+
+[CommandReceiver.receive_ack](https://github.com/FangcunMount/qs-ai/blob/bd5e18ed4659d1d9d5ab853255577139df173aff/src/qs_ai/infrastructure/workflow_transport/mq_receiver.py) 先认证原 wire、读取和校验原 Body，再开始宿主事务。confirm_event 校验原消息 kind、aggregate、摘要和对应结果记录；STORED 才 Confirm，并在同一事务标记对应 result_outbox delivered。
+
+[MySQLDurableOutbox.confirm](../../python/src/reliable_messaging/durable.py) 自己只验证原行身份／BodySHA 和 requires_receipt，不负责验证 JOSE、业务 kind 或 STORED 的产品含义。不能让未经认证的外部 message_id 直接调用 confirm。
+
+回执丢失会使原通知重投；QS 重复接收原事件时补发原 final ACK，qs-ai 继续按原事实结算。final ACK 是 receipt-free，不再要求 ACK 的 ACK。rearm_ack 保留原 wire 和失败预算，不能解除 held，也不能用于重发需要业务回执的模型命令。
+
+## 0.1 原表接入：业务 INSERT 与意图 INSERT
+
+没有采用上述 MQ 回执型表的宿主，可使用已有 pending/delivered 表。最小字段为：
+
+| 字段 | 宿主应固定的含义 |
+|---|---|
+| event_id | 原通知身份，宿主提供唯一约束 |
+| payload | 第一份通知正文；本文配方在其中同时保存 event_id |
+| delivered | 已验证接收端持久接受 |
+| attempts | 本地结算的失败／未知尝试 |
+| available_at | 下一次可处理的数据库 UTC 时间 |
+| delivered_at | 原通知接受结算时间 |
+
+表、编码、重复键与冲突策略由宿主定义，MySQLPendingOutbox 不自动生成。以下片段在宿主原事务中保存一条合成结果；business_table 和 host_outbox 是宿主迁移创建的 SQLAlchemy Table：
+
+```python
+from sqlalchemy import insert
+from reliable_messaging.sqlalchemy import bind
+
+# 原 event_id、original_payload 在可能重入的事务之外固定。
+async with db.begin():
+    await db.execute(insert(business_table).values(id=event_id, status="completed"))
+    await bind(db).append(
+        insert(host_outbox).values(
+            event_id=event_id,
+            payload=original_payload,  # 包含原 event_id；不能只存临时队列定位。
+            delivered=False, attempts=0, available_at=original_due,
+        )
+    )
+```
+
+bind 固定当前顶层事务和 savepoint；append 接受的是宿主定义的 Insert，不接受 Message、不建表、不自动算指纹或处理重复冲突。事务结束、被另一事务替换、进入不同 savepoint 都不能继续使用同一个 binding。
+
+SQLAlchemy 的逻辑 begin 还不够。adapter 检查实际 MySQL driver 的 get_autocommit=false；非 MySQL、AUTOCOMMIT 或无法验证的 driver 会被拒绝。SDK 不 commit、rollback、close 或 dispose；append 失败／取消后宿主负责回滚。
+
+若读操作已经 autobegin，就在其原 scope 绑定，或先结束该 scope 再进入新的宿主事务。不能先 pending(db)，再对同一个 session 无条件 db.begin()。
+
+## 0.1 原表接入：读与结算分开
+
+MySQLPendingOutbox.pending 返回 payload 列，而不是 Go Claim。下面用不同 session 分开读取与结算，避免 autobegin 冲突。接收端接口是合成宿主合同，实际适配必须认证响应并验证原 ID 的持久接受，不能相信任意返回值：
+
+```python
+from dataclasses import dataclass
+from typing import Protocol
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from reliable_messaging import deliver_durable
+from reliable_messaging.sqlalchemy import MySQLPendingOutbox
+
+
+@dataclass(frozen=True)
+class Receipt:
+    event_id: str
+    persisted: bool
+
+
+class DurableReceiver(Protocol):
+    # 宿主实现：在可信连接上调用并认证原事件的业务回执。
+    async def accept(self, payload: dict) -> Receipt: ...
+
+
+class Settlements:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession],
+                 adapter: MySQLPendingOutbox) -> None:
+        self.sessions, self.adapter = sessions, adapter
+
+    async def delivered(self, event_id: str) -> None:
+        async with self.sessions() as db:
+            async with db.begin():
+                await self.adapter.delivered(db, event_id)
+
+    async def retry(self, event_id: str) -> None:
+        async with self.sessions() as db:
+            async with db.begin():
+                await self.adapter.retry(db, event_id)
+
+
+async def attempt(sessions: async_sessionmaker[AsyncSession],
+                  adapter: MySQLPendingOutbox,
+                  receiver: DurableReceiver) -> int:
+    async with sessions() as db:
+        async with db.begin():
+            originals = await adapter.pending(db, limit=20)
+    # 读事务已经结束；网络调用不占用这笔事务。
+    settlements = Settlements(sessions, adapter)
+    for original in originals:
+        event_id = original["event_id"]
+
+        async def verify_original() -> None:
+            receipt = await receiver.accept(original)
+            if not receipt.persisted or receipt.event_id != event_id:
+                raise ValueError("original durable receipt not verified")
+
+        await deliver_durable(event_id, settlements, verify_original)
+    return len(originals)
+```
+
+这个配方是单进程、顺序处理，不带领取锁或跨进程 fencing。接收端必须重复安全；同一原通知重投仍查回原业务结果。表若没有 payload 内 event_id，宿主应提供自己的读取适配，不应假设 SDK 会把表键自动加入 payload。
+
+deliver_durable 的三种结算区别：
+
+| 事件 | 行为 |
+|---|---|
+| verify_original 正常返回 | 调用 store.delivered，持久接受后结算 |
+| verify_original 异常／超时 | 调用 store.retry，返回 Unknown |
+| 显式 DeliveryRejected | 同样 retry，返回 Rejected；原表不自动 hold |
+| callback 返回 Broker DeliveryResult | 拒绝将其当持久回执，retry |
+| 取消 | 传播取消，不结算未知业务结果 |
+| delivered／retry 持久写入失败 | 错误向宿主监督传播，不伪装为接收端拒绝 |
+
+SDK 不检查 HTTP/gRPC 响应内容；verify_original 的真实性由宿主实现。其结果通知已提交，才有“重投原通知”的前提，不能由这个函数触发新模型调用。
+
+## 可选 NSQ 怎样装配进现有 loop
+
+```python
+from reliable_messaging.nsq import NSQPublisher
+
+publisher = NSQPublisher("127.0.0.1:4150", timeout=5, max_in_flight=4)
+await publisher.start()  # 显式连接，构造无 I/O。
+try:
+    result = await publisher.publish("example.events", original_wire)
+    # 保留原 wire，根据 result.outcome 与 confirmation 结算原行。
+finally:
+    await publisher.stop(grace_seconds=10)
+```
+
+NSQSubscriber 需要 topic/channel、按真实来源地址映射的 borrowed publishers，以及 handler、failed_handler、invalid_handler、failure_ready。准备各来源节点的持久业务／失败 channel，启动 Publisher，再启动 Subscriber。
+
+handler 提交业务／Inbox／回执意图后返回，才 FIN；failed_handler 持久保存中转，invalid_handler 持久隔离非法原 wire，取消不 FIN。它只支持显式 nsqd，不提供 Go lookupd 动态发现或临时 channel；所有对象使用宿主同一个 asyncio/Tornado loop。
+
+Publish 超时保留真实 callback 的 in-flight slot。stop 先等待预算，再关闭自己的 client；未确认发送仍是 Unknown。不能另调 nsq.run、新建 loop、进程或线程来完成接入。详见[投递与消费](../01-核心设计/投递与消费.md)和[生命周期与恢复](../01-核心设计/生命周期与恢复.md)。
+
+## 是否需要 PeriodicRelay
+
+已有调度循环时继续用一个宿主 step。qs-ai 当前 bootstrap 装配 MQRelay 并把 step 交给已有调度器，未使用 PeriodicRelay 或 deliver_durable 作为其 MQ 路径。
+
+没有扫描循环的简单宿主可以显式使用 PeriodicRelay(attempt, poll_seconds=1, shutdown_seconds=5)，await start 后监督 wait，退出时 stop。它只调用宿主 attempt，不新增持久表、领取机制或无限重启监督。notify 丢失仍靠周期扫描。
+
+停止预算是合作取消：不合作的 callback 可能拖住 stop，不能据此提前关数据库。单进程结构、原接单任务、未知供应商结果和原冻结配置恢复仍由 qs-ai 原执行与恢复模块负责。
+
+## 接入后的证据要分开取得
+
+| 要证明的关系 | 实际验证入口 |
+|---|---|
+| 原事务、savepoint 与真实 autocommit | [MySQL tests](../../python/tests/test_mysql.py) |
+| 接单回执先于 delivered，Broker 不能冒充 | [delivery tests](../../python/tests/test_delivery.py) |
+| 原 wire、awaiting_receipt、迟到结算不覆盖 confirmed | [durable MySQL tests](../../python/tests/test_durable_mysql.py) |
+| 真实 NSQ 在持久屏障前不 FIN | [NSQ integration](../../python/tests/test_nsq_integration.py) |
+| qs-ai 业务＋Inbox＋回执共同提交／回滚 | [宿主 storage integration](https://github.com/FangcunMount/qs-ai/blob/bd5e18ed4659d1d9d5ab853255577139df173aff/tests/integration/test_mq_storage.py) |
+| 原结果与原 ACK 同事务结算 | [宿主 admission integration](https://github.com/FangcunMount/qs-ai/blob/bd5e18ed4659d1d9d5ab853255577139df173aff/tests/integration/test_mq_admission.py) |
+| 未就绪不发消息，不增加第二调度器 | [宿主 runtime tests](https://github.com/FangcunMount/qs-ai/blob/bd5e18ed4659d1d9d5ab853255577139df173aff/tests/test_messaging_runtime.py) |
+
+默认单测、一次性资源集成、installed wheel、宿主部署与业务验收是不同层。真实模型调用不属于 SDK 隔离测试；需要的冻结配置与未知结果保护必须保留宿主证据。
