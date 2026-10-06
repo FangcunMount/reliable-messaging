@@ -1,7 +1,10 @@
 GO ?= go
 GOLANGCI_VERSION := v2.5.0
-.PHONY: check fmt-check test race vet lint integration subscription-integration
-check: fmt-check vet test race
+.PHONY: check docs-check fmt-check test race vet lint integration subscription-integration
+check: docs-check fmt-check vet test race
+docs-check:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_check_docs.py
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_docs.py
 fmt-check:
 	@test -z "$$(gofmt -l $$(git ls-files '*.go') $$(git ls-files --others --exclude-standard '*.go'))"
 vet:

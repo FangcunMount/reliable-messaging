@@ -1,4 +1,5 @@
-// This M1 example shows the transaction bridge, not a released SDK API.
+// Executable public-API reference using a disposable MySQL database.
+// The host owns schema setup, the business transaction and the connection pool.
 package main
 
 import (
@@ -11,23 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FangcunMount/reliable-messaging/message"
+	outboxmysql "github.com/FangcunMount/reliable-messaging/storage/mysql"
 	"github.com/go-sql-driver/mysql"
 )
-
-type transactionAppender struct{ tx *sql.Tx }
-
-// The host supplies its existing transaction. This constructor has no I/O.
-func bindTransaction(tx *sql.Tx) (transactionAppender, error) {
-	if tx == nil {
-		return transactionAppender{}, errors.New("active host transaction required")
-	}
-	return transactionAppender{tx: tx}, nil
-}
-
-func (a transactionAppender) append(ctx context.Context, id string, payload []byte) error {
-	_, err := a.tx.ExecContext(ctx, "INSERT INTO example_outbox (id, payload) VALUES (?, ?)", id, payload)
-	return err
-}
 
 func writeIntent(ctx context.Context, db *sql.DB, id string, commit bool) error {
 	tx, err := db.BeginTx(ctx, nil)
@@ -35,20 +23,28 @@ func writeIntent(ctx context.Context, db *sql.DB, id string, commit bool) error 
 		return err
 	}
 	defer tx.Rollback() // Host owns rollback and commit, never the appender.
-	appender, err := bindTransaction(tx)
+	appender, err := outboxmysql.Bind(tx)
 	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "INSERT INTO example_business (id) VALUES (?)", id); err != nil {
 		return err
 	}
-	if err := appender.append(ctx, id, []byte(`{"event":"accepted"}`)); err != nil {
+	m, err := message.New(message.Input{
+		Producer: "example", ID: id, Destination: "example.events", EventType: "accepted",
+		SchemaVersion: "1", Scope: "synthetic", ContentType: "application/json",
+		OccurredAt: "2026-10-06T00:00:00+08:00", Payload: []byte(`{"event":"accepted"}`),
+	})
+	if err != nil {
+		return err
+	}
+	if err := appender.Append(ctx, m, time.Now()); err != nil {
 		return err
 	}
 	if !commit {
 		return tx.Rollback()
 	}
-	// No MQ call here. A future Relay reads committed intents independently.
+	// No MQ call here. A host-started Relay reads committed intents separately.
 	return tx.Commit()
 }
 
@@ -75,13 +71,13 @@ func run() error {
 	// Explicit host-side setup for this disposable example, not constructor DDL.
 	for _, statement := range []string{
 		"CREATE TABLE example_business (id VARCHAR(64) PRIMARY KEY) ENGINE=InnoDB",
-		"CREATE TABLE example_outbox (id VARCHAR(64) PRIMARY KEY, payload BLOB NOT NULL) ENGINE=InnoDB",
+		outboxmysql.Schema,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			return err
 		}
 	}
-	if _, err := bindTransaction(nil); err == nil {
+	if _, err := outboxmysql.Bind(nil); err == nil {
 		return errors.New("missing transaction accepted")
 	}
 	if err := writeIntent(ctx, db, "committed", true); err != nil {
@@ -90,16 +86,16 @@ func run() error {
 	if err := writeIntent(ctx, db, "rolled-back", false); err != nil {
 		return err
 	}
-	for _, table := range []string{"example_business", "example_outbox"} {
+	for _, row := range []struct{ table, key string }{{"example_business", "id"}, {"rm_outbox", "message_id"}} {
 		var committed, rolledBack int
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE id='committed'").Scan(&committed); err != nil {
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+row.table+" WHERE "+row.key+"='committed'").Scan(&committed); err != nil {
 			return err
 		}
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE id='rolled-back'").Scan(&rolledBack); err != nil {
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+row.table+" WHERE "+row.key+"='rolled-back'").Scan(&rolledBack); err != nil {
 			return err
 		}
 		if committed != 1 || rolledBack != 0 {
-			return fmt.Errorf("%s: commit=%d rollback=%d", table, committed, rolledBack)
+			return fmt.Errorf("%s: commit=%d rollback=%d", row.table, committed, rolledBack)
 		}
 	}
 	fmt.Println("PASS host-owned SQL transaction: business and intent commit/rollback together")

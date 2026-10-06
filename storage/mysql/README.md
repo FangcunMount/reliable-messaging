@@ -1,25 +1,32 @@
-# MySQL time and transaction boundaries
+# MySQL 标准 Outbox 适配器
 
-The host owns the original transaction, pool, connection location and session timezone. `Bind` and `BindGORM` never open another transaction, change `time_zone`, or commit on the host's behalf.
+本包实现标准租约 Outbox 的 Appender 与 Store。宿主拥有业务事务、池、session 时区、迁移和部署；Bind/BindGORM 不另开事务、不改 time_zone、不提交/回滚。用法见 [Go 接入](../../docs/02-接入指南/Go接入.md)，通用合同见[事务与 Outbox](../../docs/01-核心设计/事务与Outbox.md)。
 
-## Confirmed original-message requeue
+## 原事务与 schema
 
-`Appender.RequeueConfirmed` is an optional, explicitly invoked recovery primitive. The host first establishes that the original business effect is absent, checks the immutable original event, authorizes the action and records its decision. The SDK then conditionally changes **that same confirmed row** from `published` to `retry_wait` inside the host's transaction. It fences on record ID, version and immutable fingerprint, retains the original bytes and delivery counters, and records the host's audit request ID and new version. The method neither publishes directly nor decides whether a model call, notification or other external effect is safe to repeat. A repeated call does not silently succeed; the host resolves its durable request ledger after an unknown response.
+- [Bind](store.go) 借用原 `*sql.Tx`；[BindGORM](gorm.go) 从受支持 GORM 事务/PreparedStmtTX 提取原 SQL 事务，普通 DB/未知 wrapper 拒绝。
+- 相同身份与指纹追加幂等，冲突返回 `outbox.ErrConflict`，宿主须回滚。Appender 不能跨原事务复用。
+- New 借用池，不执行 DDL。宿主显式迁移 [schema.sql](schema.sql)（Schema 嵌入同一源）；CREATE TABLE IF NOT EXISTS 不能升级已有表。
+- Store 领取使用它自己的短调度事务与 FOR UPDATE SKIP LOCKED。这是业务提交后的阶段，token/version/state/lease 栅栏保护结算。
 
-This optional method requires `manual_replay_request_id VARBINARY(64) NULL` and `manual_replay_version BIGINT UNSIGNED NULL` in the host's `rm_outbox`. New databases using `Schema` include them. Existing hosts must add them explicitly before using this method; ordinary append, claim, confirm and retry paths do not require these columns. The host owns migration timing and the business authorization ledger. `transport_confirmed_at` remains as evidence of the prior confirmation, not evidence that every consumer completed.
+## 时间、计数与升级
 
-Standard `rm_outbox` scheduling columns (`created_at`, `next_attempt_at`, `lease_until`, `transport_confirmed_at`) contain UTC clock digits in DATETIME(6). This is an explicit storage convention: MySQL DATETIME does not carry an offset. Applications and operations reports can display these instants in UTC+8. Do not apply the connection location to these raw clock digits when displaying or migrating them.
+标准调度 DATETIME(6) 保存 **UTC 时钟数字**。DATETIME 没有偏移，adapter 以 UTC 日期字符串写入、显式格式读取数据库 UTC 时钟，避免 driver loc 二次平移。业务/运维可显示 UTC+8，不能按连接 location 重新解释这些原数字，不能批量平移历史 DATETIME 或改写消息 occurred_at。
 
-For `publishing` rows, new SDK claims set `next_attempt_at` to the same instant as `lease_until`. This keeps due-order scanning comparable with `pending` and `retry_wait` rows while lease eligibility remains fenced by `lease_until`. Older in-flight rows are normalized when claimed by the new SDK; assess or drain them before relying on mixed-state fairness during an upgrade.
+新 publishing 领取把 next_attempt_at 对齐 lease 到期，各活动状态按下一可处理时刻共同扫描。旧在途行下次领取时归一；升级公平扫描前，宿主评估或排空旧活动记录。消息字节不改写。
 
-The adapter encodes UTC scheduling values as date strings, and reads the database clock as an explicitly formatted UTC string. This avoids go-sql-driver/mysql converting `time.Time` arguments into the host connection's `loc`, or interpreting `UTC_TIMESTAMP()` as a different instant on read. `Claim.LeaseUntil` represents the actual UTC instant. Retry/confirmation and fencing use the same database UTC clock. No business message bytes or immutable `occurred_at` values are re-encoded by this correction.
+attempt_count 计领取（含租约恢复）；failure_count 只计成功栅栏 Retry/Quarantine（含内容损坏隔离），Confirm/reclaim 不增加。它不是模型或业务重试次数。v0.2.1 Store 要求 failure_count 和 updated_at；宿主做加法迁移并核对日志，不能从旧 attempt_count 推断失败。完整版本边界见[兼容与升级](../../docs/03-维护与验证/兼容与升级.md)。
 
-`v0.1.0-m2.1` passed a `loc=UTC` baseline but its standard MySQL Appender can persist an eight-hour-shifted due time on a `loc=UTC+8` host transaction. Calling `due.UTC()` alone does not prevent the driver's subsequent conversion. The M3 correction does not change schema or public APIs, and preserves the UTC baseline. Already persisted rows with a different clock convention need an explicit host audit; this fix does not rewrite history or authorize automatic replay.
+## 显式原行重排
 
-The real integration regression varies driver location (UTC/UTC+8), SQL session timezone (+00:00/+08:00), and parameter interpolation (off/on). All eight combinations must preserve persisted due instants, return correct absolute leases, permit retry/confirmation from another pool, and avoid claiming delayed messages early. The pre-fix run fails the four UTC+8 cases; the corrected adapter passes all eight. This does not establish compatibility with arbitrary historical service tables or full IAM cutover acceptance.
+[Appender.RequeueConfirmed](requeue.go)是可选恢复原语：宿主先验证业务效果缺失与原消息、批准并持久记录请求，SDK 在同一宿主事务中条件改变**原 published 行**。record ID/version/指纹栅栏保持原字节和计数，保存宿主请求 ID 与新 version；不直接 publish，不授权模型或外部副作用重发。
 
-## Failure-transition counter in v0.2.1
+它额外要求 schema 中的 manual_replay_request_id/manual_replay_version 列；一般 append/claim/confirm/retry 不需要这些可选列。transport_confirmed_at 保留 prior PUB 证据。未知返回后宿主查原治理账本，重复调用不静默成功。
 
-`attempt_count` counts claims, including lease recovery. `failure_count` counts only successfully fenced `Retry` or `Quarantine` transitions; an immutable-content quarantine also increments it. `Confirm` and reclaim do not. The host can inspect `Claim.FailureCount` before its next publish attempt, but business retry authorization and manual replay still belong to the host. This counter is in the published v0.2.1 contract.
+## 验证入口
 
-The v0.2.1 Store requires both `failure_count` and `updated_at`. Existing v0.1.0 host tables lack both: before deploying a v0.2.1 execution owner, the host must add `failure_count BIGINT UNSIGNED NOT NULL DEFAULT 0` and `updated_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6))`, then verify the table and migration journal. Do not rely on `CREATE TABLE IF NOT EXISTS` to upgrade an existing table or infer old failures from `attempt_count`. The v0.1.0 Appender/Store use explicit columns and can continue on the additive schema during a staged rollout. A real MySQL 8.0.44 upgrade test starts from the old schema, retains published and pending bytes, proves old-style appends after the DDL, and confirms the new Store fails before the DDL and reads after it. That test does not authorize an IAM production migration or rollout.
+- [原事务](../../tests/integration/mysql_test.go)、[GORM](../../tests/integration/gorm_test.go)。
+- [八组合时区](../../tests/integration/mysql_timezone_test.go)：driver UTC/UTC+8、SQL session +00:00/+08:00、参数插值 off/on。
+- [计数schema升级](../../tests/integration/mysql_failure_count_upgrade_test.go)、[原行重排](../../tests/integration/mysql_requeue_test.go)。
+
+隔离证明不覆盖任意历史宿主表，不授权生产迁移或重放。本包不是回执型 Outbox；后者见 [delivery/mysql](../../delivery/mysql/outbox.go)及其独立 [schema.sql](../../delivery/mysql/schema.sql)。
