@@ -6,7 +6,7 @@ The pinned upstream client is github.com/apache/rocketmq-clients/golang/v5 v5.1.
 
 RouteBinding version1 uses rmq_t_ plus the first32 hex digits of SHA256(logicalTopic), and rmq_g_ plus the first32 hex digits of SHA256(logicalTopic NUL logicalSubscription). Bindings must be explicit and canonical. No route is learned from message metadata. Broker names never replace the logical topic used by protected-wire authentication, message identity or fingerprinting. The original body is sent unchanged.
 
-Confirmed requires an explicit nonempty send receipt. Timeouts, network errors and missing receipts remain Unknown. The configured server must independently prove synchronous flush and persistence; a confirmation does not prove consumer effect. Rejected is limited to known local validation failures.
+Confirmed requires an explicit nonempty send receipt. Timeouts, network errors and missing receipts remain Unknown. The configured server must independently prove synchronous flush and persistence; a confirmation does not prove consumer effect. Rejected covers local validation failures and explicit Broker validation/authentication/authorization refusal. Throttling and uncertain failures remain Unknown.
 
 SimpleConsumer uses bounded receives, manual ACK, retry visibility and visibility renewal until the host deadline. A lost ACK reply does not settle the local delivery. After the delivery-attempt limit the host must durably record Failure before ACK; failed audit is retried. Broker native DLQ remains a monitored recovery obligation and is not a durable host business-failure record. Host handlers must respect cancellation; ignored cancellation remains active and can cause Close to time out.
 

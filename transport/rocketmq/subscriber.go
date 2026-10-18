@@ -196,7 +196,7 @@ func (s *Subscriber) handle(inner consumer, route transport.RouteBinding, m *dri
 	if attempt > 65535 {
 		attempt = 65535
 	}
-	received := transport.Received{Provider: "rocketmq", PhysicalTopic: route.PhysicalTopic, Wire: append([]byte(nil), m.GetBody()...), TransportID: m.GetMessageId(), Topic: route.Topic, Channel: route.Subscription, Payload: append([]byte(nil), m.GetBody()...), Attempts: uint16(attempt)}
+	received := transport.Received{Provider: "rocketmq", PhysicalTopic: m.GetTopic(), Wire: append([]byte(nil), m.GetBody()...), TransportID: m.GetMessageId(), Topic: route.Topic, Channel: route.Subscription, Payload: append([]byte(nil), m.GetBody()...), Attempts: uint16(attempt)}
 	if born := m.GetBornTimestamp(); born != nil {
 		received.Timestamp = born.UnixNano()
 	}
@@ -214,25 +214,8 @@ func (s *Subscriber) handle(inner consumer, route transport.RouteBinding, m *dri
 	}
 	d := &delivery{received: received, view: m, inner: inner, ctx: ctx, timeout: s.config.RequestTimeout, retry: s.config.RetryDelay}
 	done := make(chan error, 1)
-	go func() {
-		var err error
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				err = errors.New("handler panic")
-			}
-			done <- err
-		}()
-		if received.Attempts > s.config.MaxAttempts {
-			err = failed(ctx, transport.Failure{Provider: "rocketmq", Message: received, Cause: "delivery attempts exhausted"})
-		} else if decodeErr != nil {
-			err = decodeErr
-		} else {
-			err = handler(ctx, d)
-		}
-		if err != nil && received.Attempts >= s.config.MaxAttempts && !d.Settled() {
-			err = failed(ctx, transport.Failure{Provider: "rocketmq", Message: received, Cause: "handler failed at delivery limit"})
-		}
-	}()
+	go func() { done <- s.dispatch(ctx, d, decodeErr, handler, failed) }()
+
 	ticker := time.NewTicker(s.config.InvisibleDuration / 3)
 	defer ticker.Stop()
 	for {
@@ -360,4 +343,29 @@ func (s *Subscriber) Ready(maxAge time.Duration) bool {
 		}
 	}
 	return true
+}
+
+func (s *Subscriber) dispatch(ctx context.Context, d *delivery, decodeErr error, handler transport.Handler, failed func(context.Context, transport.Failure) error) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errors.New("handler or failure audit panic")
+		}
+	}()
+	received := d.Message()
+	if received.Attempts > s.config.MaxAttempts {
+		return failed(ctx, transport.Failure{Provider: "rocketmq", Message: received, Cause: "delivery attempts exhausted"})
+	}
+	if decodeErr != nil {
+		err = decodeErr
+	} else {
+		err = handler(ctx, d)
+	}
+	if err != nil && received.Attempts >= s.config.MaxAttempts && !d.Settled() {
+		cause := "handler failed at delivery limit"
+		if decodeErr != nil {
+			cause = "invalid envelope or physical source"
+		}
+		return failed(ctx, transport.Failure{Provider: "rocketmq", Message: d.Message(), Cause: cause})
+	}
+	return err
 }

@@ -140,3 +140,22 @@ func TestAckUncertaintyAndSingleSettlement(t *testing.T) {
 		t.Fatal("received data not owned")
 	}
 }
+
+func TestExhaustedFailureAuditRunsOncePerPhysicalDelivery(t *testing.T) {
+	s := &Subscriber{config: SubscriberConfig{MaxAttempts: 8}}
+	d := &delivery{received: transport.Received{ID: "original", Payload: []byte("immutable"), Attempts: 9}}
+	called := 0
+	err := s.dispatch(context.Background(), d, nil,
+		func(context.Context, transport.Delivery) error {
+			t.Fatal("business handler ran beyond budget")
+			return nil
+		},
+		func(_ context.Context, f transport.Failure) error {
+			called++
+			f.Message.Payload[0] = 'x'
+			return errors.New("durable audit unavailable")
+		})
+	if err == nil || called != 1 || d.Settled() || string(d.Message().Payload) != "immutable" {
+		t.Fatal("failed audit retried inline, settled, or mutated original delivery")
+	}
+}
