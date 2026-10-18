@@ -7,7 +7,12 @@ import pytest
 from rocketmq.v5.model import Message as DriverMessage  # type: ignore[import-untyped]
 
 from reliable_messaging.delivery import Confirmation, Outcome
-from reliable_messaging.rocketmq import Config, RocketMQPublisher, RocketMQSubscriber
+from reliable_messaging.rocketmq import (
+    Config,
+    RocketMQPublisher,
+    RocketMQSubscriber,
+    _require_server_settings,
+)
 from reliable_messaging.transport import RouteBinding, consumer_group, physical_topic
 from reliable_messaging.wire import Envelope, encode
 
@@ -30,6 +35,15 @@ def test_routes_fail_closed() -> None:
     publisher = RocketMQPublisher(config)
     assert publisher._driver.executor is None
     assert publisher._driver.client is None
+
+
+def test_startup_requires_real_server_settings_before_ready() -> None:
+    handshake = threading.Event()
+    client = SimpleNamespace(_init_settings_event=handshake)
+    with pytest.raises(TimeoutError):
+        _require_server_settings(client, 0.001)
+    handshake.set()
+    _require_server_settings(client, 0.001)
 
 
 async def test_publish_keeps_wire_and_requires_receipt() -> None:

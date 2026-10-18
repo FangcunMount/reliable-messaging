@@ -40,6 +40,14 @@ class Config:
         validate_routes(self.routes)
 
 
+def _require_server_settings(client: Any, timeout: float) -> None:
+    # Pinned upstream5.1.2 returns from startup before SIMPLE_CONSUMER/PRODUCER
+    # telemetry settings arrive. Broker5.5.1 requires them before ReceiveMessage.
+    # The event is set by reset_setting after the server's telemetry response.
+    if not client._init_settings_event.wait(timeout=timeout):
+        raise TimeoutError("RocketMQ server settings handshake did not complete")
+
+
 class _Driver:
     def __init__(self, config: Config, lifecycle_slots: int = 0) -> None:
         self.config = config
@@ -139,6 +147,7 @@ class RocketMQPublisher:
             # require every route before host readiness can become true.
             for topic in self.routes.values():
                 self._driver.client._retrieve_topic_route_data(topic)
+            _require_server_settings(self._driver.client, self.config.timeout)
 
         try:
             await self._driver.call(create)
@@ -244,6 +253,7 @@ class RocketMQSubscriber:
             )
             self._driver.client.startup()
             self._driver.client._retrieve_topic_route_data(self.route.physical_topic)
+            _require_server_settings(self._driver.client, self.config.timeout)
 
         try:
             await self._driver.call(create)
