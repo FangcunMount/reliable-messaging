@@ -152,3 +152,28 @@ async def test_failed_audit_cannot_ack() -> None:
     await subscriber._handle(raw)
     assert not acknowledged
     await subscriber._driver.close(1)
+
+
+async def test_receive_failure_reaches_host_supervision_with_cause() -> None:
+    config = configuration()
+    subscriber = RocketMQSubscriber(
+        config,
+        config.routes[0].topic,
+        config.routes[0].subscription,
+        handler=AsyncMock(),
+        failed_handler=AsyncMock(),
+        invalid_handler=AsyncMock(),
+    )
+    subscriber._driver.begin()
+    subscriber._slots = asyncio.Semaphore(1)
+    subscriber._failure = asyncio.get_running_loop().create_future()
+
+    def receive(*args: object) -> None:
+        raise ConnectionError("disposable broker disconnected")
+
+    subscriber._driver.client = SimpleNamespace(receive=receive, shutdown=lambda: None)
+    await subscriber._poll()
+    with pytest.raises(RuntimeError) as failure:
+        await subscriber.wait()
+    assert isinstance(failure.value.__cause__, ConnectionError)
+    await subscriber._driver.close(1)

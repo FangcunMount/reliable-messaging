@@ -216,6 +216,7 @@ class RocketMQSubscriber:
         self._tasks: set[asyncio.Task[None]] = set()
         self._slots: asyncio.Semaphore | None = None
         self._failure: asyncio.Future[None] | None = None
+        self._failure_error: BaseException | None = None
 
     async def start(self) -> None:
         self._driver.begin()
@@ -272,17 +273,22 @@ class RocketMQSubscriber:
                     task.add_done_callback(self._completed)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            if self._failure is not None and not self._failure.done():
-                self._failure.set_result(None)
+        except Exception as error:
+            self._fail(error)
+
+    def _fail(self, error: BaseException) -> None:
+        self._failure_error = error
+        if self._failure is not None and not self._failure.done():
+            self._failure.set_result(None)
 
     def _completed(self, task: asyncio.Task[None]) -> None:
         self._tasks.discard(task)
         assert self._slots is not None
         self._slots.release()
-        if not task.cancelled() and task.exception() is not None:
-            if self._failure is not None and not self._failure.done():
-                self._failure.set_result(None)
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                self._fail(error)
 
     async def _handle(self, raw: Any) -> None:
         lock = asyncio.Lock()
@@ -301,7 +307,8 @@ class RocketMQSubscriber:
                             raw,
                             math.ceil(self.invisible_duration),
                         )
-                    except Exception:
+                    except Exception as error:
+                        self._fail(error)
                         if task is not None:
                             task.cancel()
                         raise
@@ -378,7 +385,9 @@ class RocketMQSubscriber:
         if self._failure is None:
             raise RuntimeError("subscriber not started")
         await asyncio.shield(self._failure)
-        raise RuntimeError("RocketMQ subscriber stopped or transport supervision failed")
+        raise RuntimeError(
+            "RocketMQ subscriber stopped or transport supervision failed"
+        ) from self._failure_error
 
     async def stop(self, *, grace_seconds: float = 10.0) -> None:
         self._driver.closing = True
