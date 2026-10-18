@@ -45,8 +45,8 @@ func TestDependencyBoundaries(t *testing.T) {
 					t.Errorf("%s imports forbidden host dependency %s", rel, name)
 				}
 			}
-			driver := strings.HasPrefix(name, "gorm.io/") || strings.HasPrefix(name, "go.mongodb.org/") || strings.HasPrefix(name, "github.com/go-sql-driver/") || strings.HasPrefix(name, "github.com/nsqio/") || strings.HasPrefix(name, "github.com/rabbitmq/")
-			adapter := strings.HasPrefix(rel, "storage/") || strings.HasPrefix(rel, "transport/nsq/") || strings.HasPrefix(rel, "transport/rabbitmq/") || strings.HasPrefix(rel, "tests/integration/") || strings.HasPrefix(rel, "examples/")
+			driver := strings.HasPrefix(name, "github.com/apache/rocketmq-clients/") || strings.HasPrefix(name, "gorm.io/") || strings.HasPrefix(name, "go.mongodb.org/") || strings.HasPrefix(name, "github.com/go-sql-driver/") || strings.HasPrefix(name, "github.com/nsqio/") || strings.HasPrefix(name, "github.com/rabbitmq/")
+			adapter := strings.HasPrefix(rel, "transport/rocketmq/") || strings.HasPrefix(rel, "storage/") || strings.HasPrefix(rel, "transport/nsq/") || strings.HasPrefix(rel, "transport/rabbitmq/") || strings.HasPrefix(rel, "tests/integration/") || strings.HasPrefix(rel, "examples/")
 			if driver && !adapter {
 				t.Errorf("%s imports adapter driver %s", rel, name)
 			}

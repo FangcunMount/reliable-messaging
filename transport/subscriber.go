@@ -5,6 +5,10 @@ import "context"
 // Received identifies one broker delivery. ID is the application identity;
 // TransportID identifies this physical broker message. The two may differ.
 type Received struct {
+	// Provider and PhysicalTopic identify trusted transport context, not application identity.
+	Provider, PhysicalTopic string
+	// Wire preserves original broker bytes for durable invalid-message audit.
+	Wire                            []byte
 	ID, TransportID, Topic, Channel string
 	Metadata                        map[string]string
 	Payload                         []byte

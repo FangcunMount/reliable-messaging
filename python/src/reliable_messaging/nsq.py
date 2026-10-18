@@ -11,7 +11,6 @@ import json
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
 from typing import Any
 
 import nsq  # type: ignore[import-untyped]
@@ -19,6 +18,7 @@ from nsq.client import Client  # type: ignore[import-untyped]
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 from reliable_messaging.delivery import Confirmation, DeliveryResult, Outcome
+from reliable_messaging.transport import Received
 from reliable_messaging.wire import (
     FAILED_CHANNEL,
     FAILED_TYPE,
@@ -288,16 +288,6 @@ class NSQPublisher:
             self._client = None
         if self._stopped is not None:
             self._stopped.set()
-
-
-@dataclass(frozen=True)
-class Received:
-    envelope: Envelope
-    wire: bytes
-    transport_id: str
-    source_address: str
-    attempts: int
-    timestamp: int
 
 
 class NSQSubscriber:

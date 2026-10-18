@@ -73,15 +73,15 @@ jobs:
           --tmpfs /data:rw,size=64m -p 127.0.0.1:4150:4150 -p 127.0.0.1:4151:4151
           nsqio/nsq:v1.3.0 /nsqd --data-path=/data --broadcast-address=127.0.0.1
           --max-msg-size=262144 --mem-queue-size=3000 --sync-every=2500 --sync-timeout=2s
-      - run: uv sync --locked --extra nsq
-      - run: uv run --locked --extra nsq ruff check src tests
-      - run: uv run --locked --extra nsq ruff format --check src tests
-      - run: uv run --locked --extra nsq mypy src
+      - run: uv sync --locked --extra nsq --extra rocketmq
+      - run: uv run --locked --extra nsq --extra rocketmq ruff check src tests
+      - run: uv run --locked --extra nsq --extra rocketmq ruff format --check src tests
+      - run: uv run --locked --extra nsq --extra rocketmq mypy src
       - name: Contract, NSQ lifecycle, original transaction and process recovery
-        run: uv run --locked --extra nsq pytest -q --junitxml=results.xml
+        run: uv run --locked --extra nsq --extra rocketmq pytest -q --junitxml=results.xml
       - name: Require nonempty acceptance with no skipped cases
         run: |
-          uv run --locked --extra nsq python - <<'PY'
+          uv run --locked --extra nsq --extra rocketmq python - <<'PY'
           import xml.etree.ElementTree as ET
           root = ET.parse('results.xml').getroot()
           suites = list(root.iter('testsuite'))
@@ -102,12 +102,12 @@ jobs:
           uv venv .wheel-smoke
           task_wheels=(dist/*.whl)
           test "${#task_wheels[@]}" -eq 1
-          uv pip install --python .wheel-smoke/bin/python "${task_wheels[0]}[nsq]"
+          uv pip install --python .wheel-smoke/bin/python "${task_wheels[0]}[nsq,rocketmq]"
           .wheel-smoke/bin/python - <<'PY'
           from importlib.metadata import version
           from pathlib import Path
           import reliable_messaging
-          assert version('fangcun-reliable-messaging') == '0.2.0a2'
+          assert version('fangcun-reliable-messaging') == '0.3.0a1'
           assert (Path(reliable_messaging.__file__).parent / 'py.typed').is_file()
           from reliable_messaging.nsq import NSQPublisher
           from reliable_messaging.protected import Context
@@ -129,7 +129,7 @@ jobs:
           PY
       - name: Bind candidate assets to their exact source
         run: |
-          uv run --locked --extra nsq python - <<'PY'
+          uv run --locked --extra nsq --extra rocketmq python - <<'PY'
           import hashlib, json, subprocess
           from pathlib import Path
           assets = sorted([*Path('dist').glob('*.whl'), *Path('dist').glob('*.tar.gz')])
