@@ -340,6 +340,50 @@ func TestOriginalTransactionAndReservationProofs(t *testing.T) {
 			t.Fatal("observer gained send capability", err)
 		}
 	})
+	t.Run("Broker receipt audit is separate from local commitment proof", func(t *testing.T) {
+		e := reserve(t, s, "receipts")
+		ref := e.References()[0]
+		if err := s.Validate(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.BeginPrepare(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+		h := transaction.HalfReceipt{Outcome: transaction.HalfPrepared, BrokerMessageID: "synthetic-broker-id", BrokerTransactionID: "synthetic-broker-tx"}
+		if err := s.RecordHalf(ctx, e, ref, h); err != nil {
+			t.Fatal(err)
+		}
+		assertDecision(t, s, e, transaction.Unknown)
+		if err := s.RecordFinal(ctx, e, ref, transaction.FinalCommitConfirmed, ""); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("receipt fabricated local commit proof", err)
+		}
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		guard, err := s.Bind(ctx, tx, e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = guard.CommitWitness(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err = tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if err = s.RecordFinal(ctx, e, ref, transaction.FinalUnknown, "lost_ack"); err != nil {
+			t.Fatal(err)
+		}
+		assertDecision(t, s, e, transaction.Commit)
+		var brokerID, brokerTx, half, final string
+		ek, bk := key(e), transaction.BranchKey(ref.BranchID)
+		if err = db.QueryRow(`SELECT broker_message_id,broker_transaction_id,half_outcome,final_outcome FROM rm_tx_witness WHERE execution_key=? AND branch_key=?`, ek[:], bk[:]).Scan(&brokerID, &brokerTx, &half, &final); err != nil {
+			t.Fatal(err)
+		}
+		if brokerID != h.BrokerMessageID || brokerTx != h.BrokerTransactionID || half != string(transaction.HalfPrepared) || final != string(transaction.FinalUnknown) {
+			t.Fatal("receipt identity/outcome lost")
+		}
+	})
 	t.Run("schema and store identity fail closed", func(t *testing.T) {
 		wrong, err := New(db, transaction.Binding{Owner: "test.mysql", StoreID: "wrong", WriterEpoch: "epoch"})
 		if err != nil {

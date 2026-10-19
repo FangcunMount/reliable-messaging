@@ -70,7 +70,7 @@
     "metric.go": "40f077d2aff82fee8f9159e765f9f58cc4846d07a40d97e58493e9139db34e2e",
     "name_resolver.go": "8aaa51e30fdd0cdbe358076eb749ac67cbbc51107a559d729108218498e9fe37",
     "process_queue.go": "6d51d1a8c44a6c575a2c8ad2155b12e95027872a295cd7df822761604c9ef39f",
-    "producer.go": "b353cae59246febec5775334c8d816b672d6ff5808916c3cc39c5b9ede1791c1",
+    "producer.go": "d2873e3c5f169b9980e7fe9aad1c43988a69d123fe325a0d107faf2b932f69c7",
     "producer_options.go": "3fa2e4359be26f6cabb3ae2deed3a53bb7a8d69978b61d4c463cda8893765e4c",
     "publishing_message.go": "b6c06219bae4d0fbc9e961f41d9dd56769d21053b42f6ff1f2629da7c13e3fce",
     "push_consumer.go": "6e44d25c71a71fa0a78a9daeb3be97568d83ab9404450e892eb3710e2d6d6480",

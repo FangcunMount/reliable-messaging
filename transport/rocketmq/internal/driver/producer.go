@@ -412,7 +412,10 @@ func (p *defaultProducer) SendWithTransaction(ctx context.Context, msg *Message,
 	if !p.isOn() {
 		return nil, fmt.Errorf("producer is not running")
 	}
-	t := transaction.(*transactionImpl)
+	t, ok := transaction.(*transactionImpl)
+	if !ok || t == nil {
+		return nil, fmt.Errorf("foreign transaction handle")
+	}
 	pubMessage, err := t.tryAddMessage(msg, p.cli.config.NameSpace)
 	if err != nil {
 		return nil, err
@@ -424,11 +427,13 @@ func (p *defaultProducer) SendWithTransaction(ctx context.Context, msg *Message,
 	if err != nil {
 		return nil, err
 	}
-	err2 := t.tryAddReceipt(pubMessage, resp[0])
-	if err2 != nil {
-		p.cli.log.Error(err2)
+	if len(resp) != 1 || resp[0] == nil || resp[0].MessageID == "" || resp[0].TransactionId == "" {
+		return nil, fmt.Errorf("transaction half receipt incomplete")
 	}
-	return resp, err
+	if err = t.tryAddReceipt(pubMessage, resp[0]); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (p *defaultProducer) GracefulStop() error {

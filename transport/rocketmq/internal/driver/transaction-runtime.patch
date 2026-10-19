@@ -218,19 +218,38 @@
 @@ -60 +67 @@
 -	err2 := p.GracefulStop()
 +	err2 := p.cli.gracefulStopContext(ctx)
-@@ -436 +443 @@
+@@ -408 +415,4 @@
+-	t := transaction.(*transactionImpl)
++	t, ok := transaction.(*transactionImpl)
++	if !ok || t == nil {
++		return nil, fmt.Errorf("foreign transaction handle")
++	}
+@@ -420,5 +430,7 @@
+-	err2 := t.tryAddReceipt(pubMessage, resp[0])
+-	if err2 != nil {
+-		p.cli.log.Error(err2)
+-	}
+-	return resp, err
++	if len(resp) != 1 || resp[0] == nil || resp[0].MessageID == "" || resp[0].TransactionId == "" {
++		return nil, fmt.Errorf("transaction half receipt incomplete")
++	}
++	if err = t.tryAddReceipt(pubMessage, resp[0]); err != nil {
++		return nil, err
++	}
++	return resp, nil
+@@ -436 +448 @@
 -	messageId string, transactionId string, resolution TransactionResolution) error {
 +	messageId string, transactionId string, resolution TransactionResolution, source ...v2.TransactionSource) error {
-@@ -445,0 +453,4 @@
+@@ -445,0 +458,4 @@
 +		Source:        v2.TransactionSource_SOURCE_CLIENT,
 +	}
 +	if len(source) > 0 {
 +		request.Source = source[0]
-@@ -479,0 +491,3 @@
+@@ -479,0 +496,3 @@
 +	if command == nil || command.GetMessage() == nil || command.GetMessage().GetSystemProperties() == nil || command.GetMessage().GetTopic() == nil || command.GetMessage().GetSystemProperties().GetBodyDigest() == nil {
 +		return fmt.Errorf("invalid transaction recovery command")
 +	}
-@@ -486,4 +500,11 @@
+@@ -486,4 +505,11 @@
 -	go func(mv *MessageView) {
 -		resolution := p.po.checker.Check(mv)
 -		err := p.endTransaction(context.TODO(), endpoints,
@@ -246,7 +265,7 @@
 +		}
 +		err := p.endTransaction(ctx, endpoints,
 +			messageView.GetMessageCommon(), messageId, transactionId, resolution, v2.TransactionSource_SOURCE_SERVER_CHECK)
-@@ -493 +514,6 @@
+@@ -493 +519,6 @@
 -	}(messageView)
 +	}
 +	if p.checker.Dispatch != nil {
