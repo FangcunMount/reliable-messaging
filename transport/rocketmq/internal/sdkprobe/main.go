@@ -266,11 +266,27 @@ func run() error {
 			}
 		}
 	}
-	m, err := message.New(message.Input{Producer: "sdkprobe", ID: *id, Destination: "sdk.logical", EventType: "created", SchemaVersion: "1", Scope: "fixture", ContentType: "application/octet-stream", OccurredAt: "2026-10-19T00:00:00.000000123Z", Payload: []byte("sdk:" + *id)})
-	if err != nil {
-		return err
+
+	count := c.Branches
+	if count == 0 {
+		count = 1
 	}
-	p, err := transaction.NewPlan(transaction.PlanInput{Owner: c.Owner, Scope: "fixture", OperationID: "op-" + *id, IdempotencyKey: *id, InputHash: sha256.Sum256([]byte(*id)), Branches: []transaction.BranchInput{{ID: "branch", PhysicalTopic: c.Topic, RouteRevision: "sdk-v2", Message: m, Wire: []byte("sdk:" + *id)}}})
+	if count < 1 || count > 16 {
+		return errors.New("branch budget")
+	}
+	branches := make([]transaction.BranchInput, 0, count)
+	for i := 0; i < count; i++ {
+		messageID := *id
+		if count > 1 {
+			messageID = fmt.Sprintf("%s-b%d", *id, i)
+		}
+		m, err := message.New(message.Input{Producer: "sdkprobe", ID: messageID, Destination: "sdk.logical", EventType: "created", SchemaVersion: "1", Scope: "fixture", ContentType: "application/octet-stream", OccurredAt: "2026-10-19T00:00:00.000000123Z", Payload: []byte("sdk:" + messageID)})
+		if err != nil {
+			return err
+		}
+		branches = append(branches, transaction.BranchInput{ID: fmt.Sprintf("branch-%d", i), PhysicalTopic: c.Topic, RouteRevision: "sdk-v2", Message: m, Wire: []byte("sdk:" + messageID)})
+	}
+	p, err := transaction.NewPlan(transaction.PlanInput{Owner: c.Owner, Scope: "fixture", OperationID: "op-" + *id, IdempotencyKey: *id, InputHash: sha256.Sum256([]byte(*id)), Branches: branches})
 	if err != nil {
 		return err
 	}
@@ -282,15 +298,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if len(result.Branches) != 1 || result.Branches[0].Half != transaction.HalfPrepared {
+	if len(result.Branches) != count {
 		return errors.New("half result")
 	}
 	want := transaction.FinalCommitConfirmed
 	if result.Local == transaction.LocalAborted {
 		want = transaction.FinalRollbackConfirmed
 	}
-	if result.Branches[0].Final != want {
-		return errors.New("final result")
+	for _, b := range result.Branches {
+		if b.Half != transaction.HalfPrepared || b.Final != want || b.BrokerMessageID == "" || b.BrokerTransactionID == "" {
+			return errors.New("branch result")
+		}
 	}
 	emit("finalized", *id, string(result.Local))
 	return closeSender()
