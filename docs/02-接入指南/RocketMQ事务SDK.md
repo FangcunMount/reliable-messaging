@@ -97,6 +97,8 @@ infra `scripts/rocketmq/audit_transaction_limit.py` 只读查询固定5.5.1原�
 
 required 报告非空、0 failed/error/skipped，记录精确源码 SHA、镜像 digest、实际参数、版本、故障边界、用例及清理。TCP 关闭在服务端提交之前和实际 ACK 之后分别证明；客户端主动丢回复单独命名，不能称网络故障。故障代码仅在 disposable loopback fixture 中运行，绝不读取生产凭据。
 
+部分准备后的进程退出另行验证：第二个半消息已获实际 Broker ACK，但回复被代理屏障暂扣时 SIGKILL 旧进程；数据库须保留第一个分支的确认及其余分支未记录状态，业务尚未启动，再由新实例持久化完整中止证据并通过真实回查回滚。该场景不能以一次优雅关闭或客户端异常替代。
+
 Go tag与Python tag必须指向同一合并源码 SHA。固定制品重新安装需离开源码工作区，无 Go replace、无 editable/PYTHONPATH；验证 wheel/sdist 摘要与 receipt。候选/发布不代表 IAM、qs-server、qs-ai 采用或业务验收。完整进度唯一入口为 [infra M2 总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m2-execution.md)。
 
 

@@ -93,7 +93,8 @@ func run() error {
 		}
 		switch c.Action {
 		case "arm":
-			if c.Boundary != "before" && c.Boundary != "after" {
+			if c.Boundary != "before" && c.Boundary != "after" &&
+				(c.Boundary != "hold" || *kind != "rocketmq" || c.Method != "SendMessage") {
 				return errors.New("invalid boundary")
 			}
 			if c.Nth < 1 || c.Nth > 16 {

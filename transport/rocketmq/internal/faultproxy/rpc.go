@@ -136,6 +136,15 @@ func (r *rpcRelay) SendMessage(ctx context.Context, req *v2.SendMessageRequest) 
 		return nil, context.Canceled
 	}
 	response, err := r.client.SendMessage(outgoing(ctx), req)
+	if boundary == "hold" && err == nil && response.GetStatus().GetCode() == v2.Code_OK {
+		// Withhold a real successful half-message reply until the producer's
+		// actual RPC ends. The harness can now SIGKILL the process while its
+		// second send is genuinely in flight, before it can persist Unknown
+		// or start business. No extra goroutine or unbounded wait is created.
+		r.fixture.injected("hold", true)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if boundary == "after" && err == nil && response.GetStatus().GetCode() == v2.Code_OK {
 		r.disconnect(ctx, "after", true)
 	}

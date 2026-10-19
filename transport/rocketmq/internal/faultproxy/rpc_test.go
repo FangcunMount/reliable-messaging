@@ -29,6 +29,15 @@ func (s *acknowledgedServer) SendMessage(context.Context, *v2.SendMessageRequest
 	return &v2.SendMessageResponse{Status: &v2.Status{Code: v2.Code_OK}}, nil
 }
 func TestRPCFaultActuallyClosesTLSConnectionAfterBackendAck(t *testing.T) {
+	testRPCFault(t, "after")
+}
+
+func TestRPCHoldWithholdsRealAckUntilClientCancellationAndDrains(t *testing.T) {
+	testRPCFault(t, "hold")
+}
+
+func testRPCFault(t *testing.T, boundary string) {
+	t.Helper()
 	certificate := httptest.NewTLSServer(http.NotFoundHandler())
 	cert := certificate.TLS.Certificates[0]
 	certificate.Close()
@@ -57,7 +66,7 @@ func TestRPCFaultActuallyClosesTLSConnectionAfterBackendAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture := &injector{kind: "rocketmq", upstream: backend.Addr().String(), boundary: "after", method: "SendMessage", nth: 1}
+	fixture := &injector{kind: "rocketmq", upstream: backend.Addr().String(), boundary: boundary, method: "SendMessage", nth: 1}
 	closeProxy, err := fixture.startRPC(listener, certPath, keyPath)
 	if err != nil {
 		t.Fatal(err)
@@ -76,13 +85,47 @@ func TestRPCFaultActuallyClosesTLSConnectionAfterBackendAck(t *testing.T) {
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, err = v2.NewMessagingServiceClient(conn).SendMessage(ctx, &v2.SendMessageRequest{})
-	if err == nil || service.sent.Load() != 1 {
-		t.Fatal("successful backend reply reached client despite TCP fault", err)
+	if boundary == "hold" {
+		finished := make(chan error, 1)
+		go func() {
+			_, callErr := v2.NewMessagingServiceClient(conn).SendMessage(ctx, &v2.SendMessageRequest{})
+			finished <- callErr
+		}()
+		for {
+			fixture.mu.Lock()
+			acks := fixture.acks
+			fixture.mu.Unlock()
+			if acks == 1 {
+				break
+			}
+			select {
+			case callErr := <-finished:
+				t.Fatal("held reply reached client before cancellation", callErr)
+			case <-ctx.Done():
+				t.Fatal("real backend acknowledgment was not observed")
+			case <-time.After(time.Millisecond):
+			}
+		}
+		select {
+		case callErr := <-finished:
+			t.Fatal("held successful reply was released without cancellation", callErr)
+		default:
+		}
+		cancel()
+		select {
+		case err = <-finished:
+		case <-time.After(time.Second):
+			t.Fatal("held RPC did not drain after client cancellation")
+		}
+	} else {
+		_, err = v2.NewMessagingServiceClient(conn).SendMessage(ctx, &v2.SendMessageRequest{})
 	}
-	// The client can observe socket closure BEFORE the server handler has
-	// recorded its post-close audit. Join the real handler before inspecting
-	// counters; stopping now cannot cause the already-observed RPC error.
+	if err == nil || service.sent.Load() != 1 {
+		t.Fatal("successful backend reply crossed the configured fault/barrier", err)
+	}
+	// A client can observe failure before the server handler has finished its
+	// audit/cleanup. Join the real handler before inspecting counters; stopping
+	// now cannot cause the already-observed RPC error.
 	if err = closeProxy(); err != nil {
 		t.Fatal(err)
 	}
