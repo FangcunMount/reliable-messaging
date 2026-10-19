@@ -385,10 +385,14 @@ func run() error {
 			valid = result.Local == transaction.LocalCommitted && localCalls == 1 && unknown
 		case "fault-local-committed":
 			valid = result.Local == transaction.LocalCommitted && localCalls == 1
-		case "fault-local-unknown":
-			valid = result.Local == transaction.LocalUnknown && localCalls == 1
+		case "fault-local-uncommitted":
+			valid = localCalls == 1 && (result.Local == transaction.LocalUnknown || result.Local == transaction.LocalAborted)
 			for _, branch := range result.Branches {
-				valid = valid && branch.Final == transaction.FinalNotAttempted
+				if result.Local == transaction.LocalUnknown {
+					valid = valid && branch.Final == transaction.FinalNotAttempted
+				} else {
+					valid = valid && branch.Final == transaction.FinalRollbackConfirmed
+				}
 			}
 		}
 		if !valid {

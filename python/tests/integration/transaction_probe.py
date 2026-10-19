@@ -211,9 +211,13 @@ async def run(args):
                     and any(b.final == FinalOutcome.UNKNOWN for b in result.branches),
                     "fault-local-committed": result.local == LocalOutcome.COMMITTED
                     and local_calls == 1,
-                    "fault-local-unknown": result.local == LocalOutcome.UNKNOWN
-                    and local_calls == 1
-                    and all(b.final == FinalOutcome.NOT_ATTEMPTED for b in result.branches),
+                    "fault-local-uncommitted": local_calls == 1
+                    and (
+                        result.local == LocalOutcome.UNKNOWN
+                        and all(b.final == FinalOutcome.NOT_ATTEMPTED for b in result.branches)
+                        or result.local == LocalOutcome.ABORTED
+                        and all(b.final == FinalOutcome.ROLLBACK_CONFIRMED for b in result.branches)
+                    ),
                 }.get(args.mode, False)
                 emit(
                     "result",
@@ -349,7 +353,7 @@ def main():
             "fault-half",
             "fault-final",
             "fault-local-committed",
-            "fault-local-unknown",
+            "fault-local-uncommitted",
         ),
         required=True,
     )
