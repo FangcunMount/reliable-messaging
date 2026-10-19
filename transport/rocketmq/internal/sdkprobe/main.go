@@ -35,7 +35,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
-type config struct{ Endpoint, AccessKey, SecretKey, CA, Topic, Group, Owner, DSN, MongoURI, Storage string }
+type config struct {
+	Endpoint, AccessKey, SecretKey, CA, Topic, Group, Owner, DSN, MongoURI, Storage string
+	Branches                                                                        int
+}
 
 var output sync.Mutex
 
