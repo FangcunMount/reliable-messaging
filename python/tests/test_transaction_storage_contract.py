@@ -23,8 +23,13 @@ from reliable_messaging.transaction import (
     execution_key,
     validate_advance,
 )
+from reliable_messaging.transaction_mysql import SCHEMA
 
 VECTORS = Path(__file__).resolve().parents[2] / "contracts/transaction-storage-v1.json"
+
+
+def test_installed_schema_matches_go_original_transaction_template():
+    assert SCHEMA == (VECTORS.parent.parent / "storage/transaction/mysql/schema.sql").read_text()
 
 
 def test_shared_storage_vectors_and_first_wire_roundtrip():

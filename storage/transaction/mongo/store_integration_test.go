@@ -273,7 +273,10 @@ func TestOriginalMongoTransactionProofs(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer session.EndSession(ctx)
-		if err = db.Client().Database("admin").RunCommand(ctx, bson.D{{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: bson.M{"times": 1}}, {Key: "data", Value: bson.M{"failCommands": bson.A{"commitTransaction"}, "errorCode": 91, "errorLabels": bson.A{"UnknownTransactionCommitResult"}}}}).Err(); err != nil {
+		var before struct {
+			Count int64 `bson:"count"`
+		}
+		if err = db.Client().Database("admin").RunCommand(ctx, bson.D{{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: bson.M{"times": 1}}, {Key: "data", Value: bson.M{"failCommands": bson.A{"commitTransaction"}, "writeConcernError": bson.M{"code": 64, "codeName": "WriteConcernFailed", "errmsg": "fixture commit acknowledgement uncertain"}, "errorLabels": bson.A{"UnknownTransactionCommitResult"}}}}).Decode(&before); err != nil {
 			t.Fatal(err)
 		}
 		calls := 0
@@ -291,7 +294,21 @@ func TestOriginalMongoTransactionProofs(t *testing.T) {
 		if err != nil || calls != 1 {
 			t.Fatal(calls, err)
 		}
+
 		assertDecision(t, s, e, transaction.Commit)
+		var after struct {
+			Count int64 `bson:"count"`
+		}
+		if err = db.Client().Database("admin").RunCommand(ctx, bson.D{{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: "off"}}).Decode(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after.Count != before.Count+1 {
+			t.Fatal("real commit failpoint was not exercised", before.Count, after.Count)
+		}
+		n, err := db.Collection("tx_business").CountDocuments(ctx, bson.M{"_id": "commit-retry"})
+		if err != nil || n != 1 {
+			t.Fatal(n, err)
+		}
 	})
 	t.Run("explicit retry and replan preserve old terminal evidence", func(t *testing.T) {
 		e := reserve(t, s, "retry")
