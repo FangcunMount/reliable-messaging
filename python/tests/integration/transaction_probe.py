@@ -260,6 +260,7 @@ async def run(args):
         # Never dispose a host pool while SDK resources are still running.
         if not sender.stats()["stopped"]:
             await sender.close(grace_seconds=20)
+            emit("metrics", args.id, json.dumps(sender.stats()))
             emit("closed", args.id, "failed_start_drained")
         await engine.dispose()
 

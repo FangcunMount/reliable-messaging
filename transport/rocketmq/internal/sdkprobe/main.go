@@ -283,9 +283,12 @@ func run() error {
 		if closeErr := sender.Close(closeCtx); closeErr != nil {
 			return closeErr
 		}
-		if !sender.Stats().Stopped {
+		stats := sender.Stats()
+		if !stats.Stopped {
 			return errors.New("failed startup still owns resources")
 		}
+		rawStats, _ := json.Marshal(stats)
+		emit("metrics", *id, string(rawStats))
 		emit("closed", *id, "failed_start_drained")
 		return err
 	}
