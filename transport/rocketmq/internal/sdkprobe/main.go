@@ -296,6 +296,16 @@ func run() error {
 				}
 				if command.Text() == "seal" {
 					sender.StopAdmission()
+					request := transaction.Request{Owner: c.Owner, Scope: "fixture", Key: *id, InputHash: sha256.Sum256([]byte(*id))}
+					prior, readErr := store.Lookup(ctx, request)
+					if readErr != nil {
+						emit("failed", "", "seal_fixture_lookup_failed")
+						continue
+					}
+					if _, reserveErr := sender.Reserve(ctx, request, prior.Execution.Plan); reserveErr == nil {
+						emit("failed", "", "seal_admitted_request")
+						continue
+					}
 					stats := sender.Stats()
 					if stats.Ready || !stats.Stopping {
 						emit("failed", "", "seal_failed")

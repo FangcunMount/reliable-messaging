@@ -106,6 +106,21 @@ async def run(args):
                         break
                     if command == "seal":
                         sender.stop_admission()
+                        request = Request(
+                            config["owner"],
+                            "fixture",
+                            args.id,
+                            hashlib.sha256(args.id.encode()).digest(),
+                        )
+                        prior = await store.lookup(request)
+                        if prior is None:
+                            raise RuntimeError("seal fixture request missing")
+                        try:
+                            await sender.reserve(request, prior.execution.plan)
+                        except RuntimeError:
+                            pass
+                        else:
+                            raise RuntimeError("sealed sender admitted request")
                         if sender.stats()["ready"] or not sender.stats()["stopping"]:
                             raise RuntimeError("seal failed")
                         emit("sealed", decision="admission_stopped_checker_alive")
