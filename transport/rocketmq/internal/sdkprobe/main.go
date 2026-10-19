@@ -40,6 +40,7 @@ type config struct {
 	OwnerRoutes                                                                                   []rocketmq.TransactionRoute `json:"owner_routes"`
 	Endpoint, AccessKey, SecretKey, CA, Topic, Group, Owner, DSN, MongoURI, Storage, Subscription string
 	Inputs                                                                                        []transport.RouteBinding
+	LeaseMillis                                                                                   int `json:"lease_millis"`
 	Branches                                                                                      int
 }
 
@@ -232,6 +233,9 @@ func run() error {
 	}
 	limits := transaction.DefaultLimits()
 	limits.Lease = 15 * time.Second
+	if c.LeaseMillis > 0 {
+		limits.Lease = time.Duration(c.LeaseMillis) * time.Millisecond
+	}
 	limits.ReconcileInterval = 200 * time.Millisecond
 	limits.RPCTimeout = 5 * time.Second
 	limits.CheckTimeout = 2 * time.Second
@@ -289,6 +293,15 @@ func run() error {
 			for command.Scan() {
 				if command.Text() == "stop" {
 					break
+				}
+				if command.Text() == "seal" {
+					sender.StopAdmission()
+					stats := sender.Stats()
+					if stats.Ready || !stats.Stopping {
+						emit("failed", "", "seal_failed")
+					} else {
+						emit("sealed", "", "admission_stopped_checker_alive")
+					}
 				}
 			}
 			close(done)

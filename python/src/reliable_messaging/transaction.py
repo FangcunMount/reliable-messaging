@@ -7,6 +7,7 @@ These producer outcomes never describe consumer effects or business receipts.
 import base64
 import hashlib
 import json
+import math
 import struct
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -585,7 +586,17 @@ class Limits:
 
     def __post_init__(self) -> None:
         if not (
-            0 < self.sends <= 1024
+            all(
+                type(v) is int
+                for v in (
+                    self.sends,
+                    self.branches,
+                    self.check_workers,
+                    self.check_queue,
+                    self.reconcile_batch,
+                )
+            )
+            and 0 < self.sends <= 1024
             and 0 < self.branches <= MAX_BRANCHES
             and 0 < self.check_workers <= 128
             and 0 <= self.check_queue <= 10000
@@ -594,6 +605,11 @@ class Limits:
             and self.rpc_timeout > 0
             and self.lease > self.rpc_timeout
             and self.reconcile_interval > 0
+            and 0.001 <= self.lease <= 86400
+            and all(
+                math.isfinite(v)
+                for v in (self.check_timeout, self.rpc_timeout, self.lease, self.reconcile_interval)
+            )
         ):
             raise ValueError("invalid bounded transaction limits")
 

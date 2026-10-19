@@ -194,6 +194,9 @@ async def test_inert_constructor_and_positive_fresh_proof_after_commit_reply_los
         await sender.execute(execution, local)
     assert error.value.result.local == LocalOutcome.COMMITTED
     assert error.value.result.branches[0].final == FinalOutcome.UNKNOWN
+    assert sender.stats()["completed_results"] == 1
+    assert sender.stats()["local_committed_results"] == 1
+    assert sender.stats()["final_unknown_results"] == 1
     with pytest.raises(TransactionSendError):
         await sender.execute(execution, local)
     assert calls == client.sent == 1

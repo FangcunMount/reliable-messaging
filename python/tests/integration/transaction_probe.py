@@ -69,7 +69,7 @@ async def run(args):
                 TransactionRoute(r["topic"], r["physical_topic"], r["route_revision"])
                 for r in config["owner_routes"]
             ),
-            Limits(lease=15, reconcile_interval=0.2),
+            Limits(lease=config.get("lease_millis", 15000) / 1000, reconcile_interval=0.2),
         ),
         store,
     )
@@ -100,8 +100,15 @@ async def run(args):
 
             monitor_task = asyncio.create_task(monitor())
             try:
-                while (await asyncio.to_thread(sys.stdin.readline)).strip() != "stop":
-                    pass
+                while True:
+                    command = (await asyncio.to_thread(sys.stdin.readline)).strip()
+                    if command == "stop" or not command:
+                        break
+                    if command == "seal":
+                        sender.stop_admission()
+                        if sender.stats()["ready"] or not sender.stats()["stopping"]:
+                            raise RuntimeError("seal failed")
+                        emit("sealed", decision="admission_stopped_checker_alive")
             finally:
                 monitor_task.cancel()
                 await asyncio.gather(monitor_task, return_exceptions=True)

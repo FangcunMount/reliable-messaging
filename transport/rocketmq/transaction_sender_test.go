@@ -182,6 +182,10 @@ func TestTransactionSenderSeparatesLocalCommitFromLostFinalAck(t *testing.T) {
 			t.Fatal("phase/Broker/business identities conflated")
 		}
 	}
+	stats := s.Stats()
+	if stats.CompletedResults != 1 || stats.LocalCommittedResults != 1 || stats.FinalUnknownResults != 2 || stats.HalfPreparedResults != 2 {
+		t.Fatal("lost final reply hidden from phase counters", stats)
+	}
 	if _, err = s.Execute(context.Background(), e, func(context.Context, transaction.Execution) (transaction.LocalOutcome, error) {
 		calls++
 		return transaction.LocalCommitted, nil

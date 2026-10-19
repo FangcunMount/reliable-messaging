@@ -176,3 +176,36 @@ func TestExecutionFenceIsPortableAndEveryBranchMustAgree(t *testing.T) {
 		t.Fatal("ambiguous half accepted")
 	}
 }
+
+func TestProtocolReferenceEncodeNeverExceedsDecoderBudget(t *testing.T) {
+	ref, err := plans(t)[0].Reference("branch-0", 1, "epoch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each identity is valid alone, but JSON escaping expands the aggregate.
+	ref.Owner = string(bytes.Repeat([]byte{1}, 255))
+	ref.Scope = ref.Owner
+	ref.OperationID = ref.Owner
+	ref.BranchID = ref.Owner
+	ref.MessageID = ref.Owner
+	ref.LogicalTopic = ref.Owner
+	ref.PhysicalTopic = ref.Owner
+	ref.RouteRevision = ref.Owner
+	ref.WriterEpoch = ref.Owner
+	if !ref.Valid() {
+		t.Fatal("fixture must exercise aggregate encoding limit")
+	}
+	if _, err := EncodeReference(ref); err == nil {
+		t.Fatal("encoded an undecodable Reference")
+	}
+}
+
+func TestLeaseLimitsMatchPersistentStoreRange(t *testing.T) {
+	for _, duration := range []time.Duration{25 * time.Hour, time.Millisecond / 2} {
+		limits := DefaultLimits()
+		limits.Lease, limits.RPCTimeout = duration, time.Nanosecond
+		if limits.Valid() {
+			t.Fatal("lease outside persistent-store range admitted", duration)
+		}
+	}
+}

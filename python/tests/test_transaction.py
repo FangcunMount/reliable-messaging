@@ -163,3 +163,18 @@ def test_new_fence_reuses_wire_without_reopening_old_terminal():
     assert resolve(old, old_proof) == Decision.ROLLBACK
     assert resolve(new, new_proof) == Decision.COMMIT
     assert resolve(old, new_proof) == resolve(new, old_proof) == Decision.UNKNOWN
+
+
+def test_bounded_limits_reject_non_finite_and_non_integer_capacity():
+    from reliable_messaging.transaction import Limits
+
+    for field in ("check_timeout", "rpc_timeout", "lease", "reconcile_interval"):
+        for value in (float("inf"), float("nan")):
+            with pytest.raises(ValueError):
+                Limits(**{field: value})
+    for field in ("sends", "branches", "check_workers", "check_queue", "reconcile_batch"):
+        for value in (1.5, True):
+            with pytest.raises(ValueError):
+                Limits(**{field: value})
+    with pytest.raises(ValueError):
+        Limits(lease=86401)

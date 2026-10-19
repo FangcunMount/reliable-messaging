@@ -51,6 +51,8 @@ func (s *TransactionalSender) Execute(ctx context.Context, e transaction.Executi
 	go func() {
 		defer func() { <-s.slots; s.sendWG.Done(); close(op.done) }()
 		err := s.execute(ctx, e, local, op)
+		result, _ := op.snapshot()
+		s.recordResult(result)
 		op.mu.Lock()
 		op.err = err
 		op.mu.Unlock()
@@ -289,4 +291,38 @@ func (s *TransactionalSender) finalize(e transaction.Execution, handles []transa
 		}
 	}
 	return combined
+}
+
+// Counters describe completed SDK result observations, not distinct business
+// effects or consumer completion. No IDs or caller-controlled labels are used.
+func (s *TransactionalSender) recordResult(result transaction.Result) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stats.CompletedResults++
+	switch result.Local {
+	case transaction.LocalCommitted:
+		s.stats.LocalCommittedResults++
+	case transaction.LocalAborted:
+		s.stats.LocalAbortedResults++
+	case transaction.LocalUnknown:
+		s.stats.LocalUnknownResults++
+	}
+	for _, b := range result.Branches {
+		switch b.Half {
+		case transaction.HalfPrepared:
+			s.stats.HalfPreparedResults++
+		case transaction.HalfRejected:
+			s.stats.HalfRejectedResults++
+		case transaction.HalfUnknown:
+			s.stats.HalfUnknownResults++
+		}
+		switch b.Final {
+		case transaction.FinalCommitConfirmed:
+			s.stats.FinalCommitResults++
+		case transaction.FinalRollbackConfirmed:
+			s.stats.FinalRollbackResults++
+		case transaction.FinalUnknown:
+			s.stats.FinalUnknownResults++
+		}
+	}
 }
