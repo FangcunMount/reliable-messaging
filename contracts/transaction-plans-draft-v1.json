@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "plans": [
+    {
+      "owner": "qs.mysql",
+      "scope": "org:19",
+      "operation_id": "op-sql",
+      "idempotency_key": "request-key",
+      "input_hash": "d014808624f8b42f2816a25f7eb869a1b9189024f70d98ffed5f83730a17d6ba",
+      "branches": [
+        {
+          "id": "branch-0",
+          "physical_topic": "tx-qs-mysql-0",
+          "route_revision": "2",
+          "message": {
+            "Producer": "qs.apiserver",
+            "ID": "event-a",
+            "Destination": "qs.evaluation.failed",
+            "EventType": "fixture.event",
+            "SchemaVersion": "1",
+            "Scope": "org:19",
+            "ContentType": "application/json",
+            "OccurredAt": "2026-10-19T00:00:00.123456789+08:00",
+            "Payload": "eyJmYWN0Ijp0cnVlfQ=="
+          },
+          "wire": "Zmlyc3QtZnJvemVuLXdpcmUA/zA=",
+          "message_fingerprint": "db0eb45118a92f856fdb2c003e49ea9bccbdc976515565a201c0144a51626b18",
+          "wire_hash": "d2b5dc3f97a93af1f9dba3eb903f0d51f5ad4016194cde2b22f0bbf3e2f96d7f"
+        }
+      ],
+      "plan_digest": "5dcbd6fa4be3614fc5760eadf813af23784d9ef8125d640cfee4afad60087437"
+    },
+    {
+      "owner": "qs.mongo",
+      "scope": "org:测试",
+      "operation_id": "操作-mongo",
+      "idempotency_key": "request-key",
+      "input_hash": "d014808624f8b42f2816a25f7eb869a1b9189024f70d98ffed5f83730a17d6ba",
+      "branches": [
+        {
+          "id": "branch-0",
+          "physical_topic": "tx-qs-mongo-0",
+          "route_revision": "2",
+          "message": {
+            "Producer": "qs.apiserver",
+            "ID": "提交-1",
+            "Destination": "qs.answersheet.submitted",
+            "EventType": "fixture.event",
+            "SchemaVersion": "1",
+            "Scope": "org:测试",
+            "ContentType": "application/json",
+            "OccurredAt": "2026-10-19T00:00:00.123456789+08:00",
+            "Payload": "AP8A"
+          },
+          "wire": "Zmlyc3QtZnJvemVuLXdpcmUA/zA=",
+          "message_fingerprint": "369b0adb6f2cf19d7a41384a94d8e50a84f7f30d716084f7afb306598664b31d",
+          "wire_hash": "d2b5dc3f97a93af1f9dba3eb903f0d51f5ad4016194cde2b22f0bbf3e2f96d7f"
+        },
+        {
+          "id": "branch-1",
+          "physical_topic": "tx-qs-mongo-1",
+          "route_revision": "2",
+          "message": {
+            "Producer": "qs.apiserver",
+            "ID": "提交-2",
+            "Destination": "qs.answersheet.submitted",
+            "EventType": "fixture.event",
+            "SchemaVersion": "1",
+            "Scope": "org:测试",
+            "ContentType": "application/json",
+            "OccurredAt": "2026-10-19T00:00:00.123456789+08:00",
+            "Payload": "AP8B"
+          },
+          "wire": "Zmlyc3QtZnJvemVuLXdpcmUA/zE=",
+          "message_fingerprint": "6fe82209a6c3bfd65fdb0826be8afbe2e071cf7ea394a0d6202521037f695bdf",
+          "wire_hash": "8ed7ce296bb26a538bca887a5c80ef9393ed55b28537659b98a3df025ac30ac9"
+        }
+      ],
+      "plan_digest": "60cc4b34a3ced2dfcb1b40172527fe867e9ed51a18344ed96ba805b4e1055290"
+    }
+  ]
+}
