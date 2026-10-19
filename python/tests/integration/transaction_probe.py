@@ -29,6 +29,7 @@ from reliable_messaging.transaction import (
     Limits,
     LocalOutcome,
     Request,
+    resolve,
 )
 from reliable_messaging.transaction_mysql import MySQLTransactionStore
 from reliable_messaging.transport import RouteBinding
@@ -43,6 +44,25 @@ def emit(event, identity="", decision=""):
             "TXPROBE " + json.dumps({"event": event, "id": identity, "decision": decision}),
             flush=True,
         )
+
+
+class ObservedStore:
+    """Transparent observation of actual public Checker reads, never fake evidence."""
+
+    def __init__(self, store):
+        self._store = store
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def evidence(self, reference):
+        try:
+            evidence = await self._store.evidence(reference)
+        except BaseException:
+            emit("checked_reference", reference.message_id, "unknown")
+            raise
+        emit("checked_reference", reference.message_id, resolve(reference, evidence).value)
+        return evidence
 
 
 async def run(args):
@@ -71,7 +91,7 @@ async def run(args):
             ),
             Limits(lease=config.get("lease_millis", 15000) / 1000, reconcile_interval=0.2),
         ),
-        store,
+        ObservedStore(store) if args.mode == "recover" else store,
     )
     try:
         await sender.start()

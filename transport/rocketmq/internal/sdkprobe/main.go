@@ -48,6 +48,21 @@ type config struct {
 
 var output sync.Mutex
 
+// Observe the real store read made by the public runtime's Checker. Only idle
+// recovery probes use this transparent adapter; it never changes evidence,
+// performs a second read, or acknowledges the Broker itself.
+type observedStore struct{ transaction.PreparedStore }
+
+func (s observedStore) Evidence(ctx context.Context, ref transaction.Reference) (*transaction.Evidence, error) {
+	evidence, err := s.PreparedStore.Evidence(ctx, ref)
+	decision := transaction.Unknown
+	if err == nil {
+		decision = transaction.Resolve(ref, evidence)
+	}
+	emit("checked_reference", ref.MessageID, string(decision))
+	return evidence, err
+}
+
 func emit(event, id, decision string) {
 	output.Lock()
 	defer output.Unlock()
@@ -273,7 +288,11 @@ func run() error {
 		routes = []rocketmq.TransactionRoute{{LogicalTopic: "sdk.logical", PhysicalTopic: c.Topic, Revision: c.Revision}}
 	}
 	sdkConfig := rocketmq.TransactionConfig{Endpoint: c.Endpoint, AccessKey: c.AccessKey, SecretKey: c.SecretKey, TLS: tlsConfig, Owner: c.Owner, Routes: routes, Limits: limits}
-	sender, err := rocketmq.NewTransactionalSender(sdkConfig, store)
+	senderStore := store
+	if *mode == "recover" {
+		senderStore = observedStore{store}
+	}
+	sender, err := rocketmq.NewTransactionalSender(sdkConfig, senderStore)
 	if err != nil {
 		return err
 	}
