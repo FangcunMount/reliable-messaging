@@ -163,7 +163,7 @@ func run() error {
 			defer session.EndSession(ctx)
 			// The driver may retry THIS PURE DATABASE callback; no new messages, IDs,
 			// signatures, network sends or model calls are generated within it.
-			_, err = session.WithTransaction(localCtx, func(sc mongo.SessionContext) (any, error) {
+			business := func(sc mongo.SessionContext) (any, error) {
 				guard, err := s.Bind(sc, e)
 				if err != nil {
 					return nil, err
@@ -172,7 +172,25 @@ func run() error {
 					return nil, err
 				}
 				return nil, guard.CommitWitness(sc)
-			}, options.Transaction().SetReadConcern(readconcern.Snapshot()).SetWriteConcern(writeconcern.Majority()))
+			}
+			txOptions := options.Transaction().SetReadConcern(readconcern.Snapshot()).SetWriteConcern(writeconcern.Majority())
+			if strings.HasPrefix(*mode, "fault-local-") {
+				// Pinned v1.17.6 WithTransaction retries unknown commits for 120s
+				// using a background commit context. This host fault fixture uses
+				// the driver's explicit original transaction/commit API instead.
+				// The proxy still drops real TCP packets at the server boundary;
+				// cancellation never decides whether business committed.
+				commitCtx, cancel := context.WithTimeout(localCtx, 10*time.Second)
+				defer cancel()
+				if err = session.StartTransaction(txOptions); err == nil {
+					_, err = business(mongo.NewSessionContext(commitCtx, session))
+					if err == nil {
+						err = session.CommitTransaction(commitCtx)
+					}
+				}
+			} else {
+				_, err = session.WithTransaction(localCtx, business, txOptions)
+			}
 			if err != nil {
 				return transaction.LocalUnknown, err
 			}

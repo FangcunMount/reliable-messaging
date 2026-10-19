@@ -77,6 +77,8 @@ infra 的 v2 manifest 显式列出 type/owner/revision；既有 Topic 类型、�
 
 构造无网络/线程/goroutine。Start 验证绑定/schema 并注册该 owner 所有 TRANSACTION Topic；没有新发送的空闲实例也必须启动回查。Go 在上游创建 goroutine 之前准入；Python 在提交上游线程池之前准入，保留固定客户端自身 I/O loop。Python DB coroutine 转到宿主现有 asyncio loop，并创建独立短生命周期 session；不跨线程共享 AsyncSession，不更改全局 factory。
 
+宿主还须核对所用数据库驱动的真实等待语义。固定 Mongo Go 1.17.6 的 `WithTransaction` 在未知提交时可重试120秒，其内部 Commit 使用不继承调用方 deadline 的 context。需要更短提交预算时，宿主可显式 `StartTransaction`、在同一 session 写业务及 witness，再以实际预算调用 `CommitTransaction`；提交错误仍是 Unknown，不能因 deadline 判定回滚。SDK关闭超时保留真实在途计数，不提前释放仍在运行的宿主 callback。
+
 调用方超时/取消不提前释放仍在运行的数据库、线程或 RPC 槽位。回查队列满/关闭拒绝时按 Unknown 处理并计数，不在拒绝路径另建任务。发送与最终确认都有实际 RPC deadline；未知半消息不会被客户端自动物理重发。宿主回调必须合作处理取消，SDK 不能强杀业务代码。
 
 关闭顺序：`StopAdmission` → 等待真实在途 UOW/发送 → 保持 Checker 服务未决事务 → 封闭并排空本实例回查 → 关闭所属客户端资源。Go `Close(ctx)` / `Wait(ctx)`、Python `close(grace_seconds=...)` / `wait()`；超时返回 `ShutdownIncomplete`/`ShutdownIncompleteError.counts`，允许继续 Wait。它不表示全群集未知消息均已解决；滚动重启应保留其他 owner Checker 实例。
