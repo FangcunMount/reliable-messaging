@@ -1,28 +1,54 @@
 # 版本与发布索引
 
-本页索引可消费的语言版本、固定源码与发布资产，不代表宿主已部署或业务已验收。2026-10-06（UTC+8）以GitHub Release / tag API只读核验；本地tag同时核对但不作为远端发布的唯一证明。后续新增版本需更新本页，不能沿用本次“最新”结论。
+本页记录可消费的固定语言版本、源码与发布资产。2026-10-19（UTC+8）核验RocketMQ事务预发布的远端tag、GitHub Release及全部服务器资产摘要；宿主依赖、部署和业务验收由各宿主另行记录。历史条目保留其采集日期。
 
 <!-- source-python-version: 0.4.0a1 -->
 
-当前工作分支准备 Python `0.4.0a1` 与 Go `v0.5.0-rocketmq-tx.1`，增加独立 [RocketMQ 事务 SDK](../02-接入指南/RocketMQ事务SDK.md)。下表保留此前已发布版本的采集记录；新候选尚未形成 Release、完整故障验证或宿主生产采用证据。
+## RocketMQ当前固定预发布（2026-10-19）
 
-## 当前源码、标签、制品与宿主
+Go与Python事务SDK的两个tag均指向同一合并源码[`bfaae2b`](https://github.com/FangcunMount/reliable-messaging/commit/bfaae2b82ee0d1229b8c965fce472cdf5dec486f)，均为GitHub prerelease。事务入口、原业务事务witness、Checker及关闭契约见[事务SDK接入](../02-接入指南/RocketMQ事务SDK.md)。Python源码版本为0.4.0a1；不从源码版本或标签推断宿主已采用。
+
+| 版本 | 固定源码 | 发布时间（UTC+8） | 范围 |
+| --- | --- | --- | --- |
+| [Go v0.5.0-rocketmq-tx.1](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.5.0-rocketmq-tx.1) | `bfaae2b82ee0d1229b8c965fce472cdf5dec486f` | 2026-10-19 16:49:31 | Go sql/GORM/Mongo事务SDK；普通Publisher/旧Outbox保持独立 |
+| [Python python/v0.4.0a1](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.4.0a1) | `bfaae2b82ee0d1229b8c965fce472cdf5dec486f` | 2026-10-19 16:49:37 | SQLAlchemy/MySQL事务SDK；不含Python Mongo |
+| [Go v0.4.0-rocketmq.1](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.4.0-rocketmq.1) | `18c0c38b5869b60eac5ce238c15d5e5c4048eeea` | 2026-10-18 21:52:09 | 前序普通消息预发布 |
+| [Python python/v0.3.0a1](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.3.0a1) | `18c0c38b5869b60eac5ce238c15d5e5c4048eeea` | 2026-10-18 21:52:14 | 前序普通消息预发布 |
+
+M2两个Release各附相同的6个固定资产：wheel、sdist、uv.lock、transaction-acceptance.json、transaction-release-receipt.json及SHA256SUMS。服务器摘要与发布前bundle逐项一致；安装前下载对应资产并校验SHA256SUMS，不替换已发布资产或移动tag。本轮不发布PyPI。
+
+| 资产 | SHA-256 |
+| --- | --- |
+| `fangcun_reliable_messaging-0.4.0a1-py3-none-any.whl` | `47c67e6037f427da4e27597ddaaac4fb4c38f8bc78c5c6aa4758618d53d05606` |
+| `fangcun_reliable_messaging-0.4.0a1.tar.gz` | `a6d9e2a1931d9713136a49802eb95078f9f16ddc0f131e3bfe7999ab849f0206` |
+| `transaction-release-receipt.json` | `8f7a49641dc39cbc7f0a29f32ca971d818ed0aa7542eb7e252968e25f7da9cfc` |
+| `SHA256SUMS` | `03aa42ce9c7ea59e2c9ad25b2561c0be4411f5648489c33f5c216e3a8cc6ecb7` |
+
+发布前精确SHA的[源码/race/lint](https://github.com/FangcunMount/reliable-messaging/actions/runs/39222098471)、[三档真实存储](https://github.com/FangcunMount/reliable-messaging/actions/runs/39222116696)、[双Python源码及wheel](https://github.com/FangcunMount/reliable-messaging/actions/runs/39222109646)、[既有NSQ集成](https://github.com/FangcunMount/reliable-messaging/actions/runs/39222098378)全部通过。Python两档各120源码+120已安装wheel，0失败/跳过；[真实Broker完整48项/档](https://github.com/FangcunMount/infra/actions/runs/39222207821)及[普通消息/raw20/Go19回归](https://github.com/FangcunMount/infra/actions/runs/39222207962)通过。独立wheel/sdist安装各17包文件与固定源码一致，依赖全部符合uv.lock，receipt随Release保存。
+
+正式tag与下载制品的两档[安装及完整48项验收](https://github.com/FangcunMount/infra/actions/runs/39225713990)正在运行；当前只确认两档安装/来源校验步骤通过，未将源码CI或已发布等同最终重装验收完成。进度与唯一任务总表见[infra M2记录](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m2-execution.md)。
+
+固定Broker5.5.1、Go底层5.1.4加可复现私有补丁、Python底层5.1.2。Go启动Telemetry共享RetryPolicy导致的protobuf大小不匹配已在发布前修复，并通过确定性快照、race及实际TLS交换回归。Broker回查有有限窗口；消费者仍需幂等，SDK不重复业务/模型调用、不自动降级NSQ/Outbox。本文不记录M3生产切换或三宿主业务采用。
+
+以下保留2026-10-06的早期版本和宿主采集快照；其中“当时最新”不是2026-10-19的当前发布结论。
+
+## 2026-10-06历史采集：源码、标签、制品与宿主
 
 | 层次 | 本次核对结果 | 结论边界 |
 | --- | --- | --- |
 | 文档重建前main源码 | [fd06495ca819124c73ffe31b20a5381c06885e87](https://github.com/FangcunMount/reliable-messaging/commit/fd06495ca819124c73ffe31b20a5381c06885e87)；Python源码版本 `0.2.0a2` | main存在实现不证明某个制品或生产宿主已采用；源码包版本见[pyproject](../../python/pyproject.toml) |
 | 本地tag | 已见Go M2/M6/MQ预发布及Python三个预发布tag | 本地ref可能过期或与远端不同；本次另读取GitHub ref并解析annotated tag |
-| GitHub Go Release | 最新已核验预发布 `v0.3.0-mq-ai.2` | 无Go v1.0 Release；Go module从固定tag消费，不要求另有二进制附件 |
-| GitHub Python资产 | 最新已核验预发布 `python/v0.2.0a2`，有wheel与sdist | 仅核验GitHub资产元数据与Release说明；本次未重新下载安装包，也未核验PyPI发布 |
+| GitHub Go Release | 当时已核验预发布 `v0.3.0-mq-ai.2` | 无Go v1.0 Release；Go module从固定tag消费，不要求另有二进制附件 |
+| GitHub Python资产 | 当时已核验预发布 `python/v0.2.0a2`，有wheel与sdist | 仅核验GitHub资产元数据与Release说明；本次未重新下载安装包，也未核验PyPI发布 |
 | IAM源码采用 | [c8fc1fe的go.mod](https://github.com/FangcunMount/iam/blob/c8fc1fe61a32056368148e232e96d32763c15ba5/go.mod)固定 `v0.3.0-m6.1` | 源码依赖，不是本次生产二进制采集 |
 | QS源码采用 | [2ccc2de的go.mod](https://github.com/FangcunMount/qs-server/blob/2ccc2de44bbd45e26d29e7e130da518cc32426f0/go.mod)固定 `v0.3.0-mq-ai.2` | 源码依赖，不是本次逐实例部署采集 |
 | qs-ai与今日生产采用 | 本轮未重新核验 | 由各宿主带采集日期的版本、配置与业务验收记录负责，不从SDK标签推断 |
 
 源于早期阶段的“候选未发布”说明不再适用于已列出的GitHub Release。反之，GitHub存在预发布也不表示原Go M0～M6、宿主MQ切换或完整业务恢复已验收。
 
-## Go公开版本
+## Go早期版本记录（截至2026-10-06）
 
-以下源码来自本次远端tag解析；Release字段 `target_commitish=main` 不用作固定源码。时间均为UTC+8。
+以下源码来自2026-10-06的远端tag采集；Release字段 `target_commitish=main` 不用作固定源码。时间均为UTC+8。
 
 | Release | 固定源码 | 发布时刻 | 范围 |
 | --- | --- | --- | --- |
@@ -39,7 +65,7 @@
 
 0.1.0、0.2.0、0.2.1的GitHub标记不是prerelease；它们仍是0.x范围，不等于已建立v1稳定承诺。`m6.*`与`mq-ai.*`属于已发表的不同范围预发布，不能仅按字串排序判断宿主应升级哪条合同。
 
-## Python公开版本与资产
+## Python早期版本记录（截至2026-10-06）
 
 | Release | 固定源码 | 发布时刻 | 附件与合同 |
 | --- | --- | --- | --- |
@@ -47,7 +73,7 @@
 | [python/v0.2.0a1](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.2.0a1) | [9f16fa3](https://github.com/FangcunMount/reliable-messaging/commit/9f16fa30dc43a50a2d4492f3e95c905a8f969331) | 2026-10-03 16:33:17 | wheel、sdist、provenance、SHA256SUMS；可选NSQ / protected wire / 独立回执型MySQL |
 | [python/v0.2.0a2](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.2.0a2) | [8633ba5](https://github.com/FangcunMount/reliable-messaging/commit/8633ba585b5a1c8f95fb16b19469fbd0097611c7) | 2026-10-04 04:46:05 | wheel、sdist、acceptance-summary、SHA256SUMS；final ACK失败预算修复 |
 
-当前a2的GitHub资产元数据摘要如下；旧资产保留在对应Release，不覆盖旧版本。安装前应下载对应资产并核对本地摘要。
+当时a2的GitHub资产元数据摘要如下；旧资产保留在对应Release，不覆盖旧版本。安装前应下载对应资产并核对本地摘要。
 
 | 资产 | GitHub登记SHA-256 |
 | --- | --- |
