@@ -1,10 +1,20 @@
 # 版本与发布索引
 
-本页记录可消费的固定语言版本、源码与发布资产。2026-10-19（UTC+8）核验RocketMQ事务预发布的远端tag、GitHub Release及全部服务器资产摘要；宿主依赖、部署和业务验收由各宿主另行记录。历史条目保留其采集日期。
+本页记录可消费的固定语言版本、源码与发布资产。2026-10-20（UTC+8）新增Go指标并发修订预发布；Python继续使用原固定版本。宿主依赖、部署和业务验收由各宿主另行记录，历史条目保留其采集日期。
 
 <!-- source-python-version: 0.4.0a1 -->
 
-## RocketMQ当前固定预发布（2026-10-19）
+## 当前Go修订预发布（2026-10-20）
+
+[Go v0.5.0-rocketmq-tx.2](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.5.0-rocketmq-tx.2)于2026-10-20 05:33:30（UTC+8）发布，固定源码为[`8fb6fc57`](https://github.com/FangcunMount/reliable-messaging/commit/8fb6fc57a415dc11e27fc64d71722f9675838bc3)，已通过[PR46](https://github.com/FangcunMount/reliable-messaging/pull/46)合并。它修复Apache Go5.1.4私有driver中Broker指标回写替换meter指针与消费ACK hook并发读取的race；公开API、事务codec、wire、schema及预算不变。Python源码未变，继续固定`0.4.0a1`及原`bfaae2b`资产，不重新发布Python。
+
+[Go1.25.9/1.25.12源码、race、lint](https://github.com/FangcunMount/reliable-messaging/actions/runs/39326653557)与[NSQ兼容](https://github.com/FangcunMount/reliable-messaging/actions/runs/39326653550)通过；[实际MySQL8.0.36/8.4.11、MongoDB及Go/Python恢复矩阵](https://github.com/FangcunMount/infra/actions/runs/39326382808)每档31项，均0失败/跳过。正式tag下载的Go模块213份选定源码文件逐字节匹配，并在模块缓存中通过meter race/TLS回归和实际SDK探针构建；不使用本地replace。Go module Sum为`h1:kBHB/1aG/fAB6BPlITOwRYIX9XazRisz0PgfwyJ1VFY=`。
+
+Release附六个固定资产：两档实际SDK验收报告、Apache补丁manifest、module-proof、发布receipt及SHA256SUMS；发布后重新下载并逐项核对。`go-meter-release-receipt.json`摘要为`0109f872501e9990cb85551078482d3eb4d81140e05a84d2aea098318750c863`，`SHA256SUMS`摘要为`dfe13bbb09e676a05bc44a114f47a084737a6aecf1df05492e76cfe3a4fb1611`。已有tag/资产未改写。
+
+这是M3接入使用的Go预发布修订；IAM/QS须锁定该版本并独立验收，不表示业务或生产已切换。M3稳定Go/Python同源码SHA发布仍由[执行总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)的T27负责。
+
+## M2固定预发布（2026-10-19）
 
 Go与Python事务SDK的两个tag均指向同一合并源码[`bfaae2b`](https://github.com/FangcunMount/reliable-messaging/commit/bfaae2b82ee0d1229b8c965fce472cdf5dec486f)，均为GitHub prerelease。事务入口、原业务事务witness、Checker及关闭契约见[事务SDK接入](../02-接入指南/RocketMQ事务SDK.md)。Python源码版本为0.4.0a1；不从源码版本或标签推断宿主已采用。
 
