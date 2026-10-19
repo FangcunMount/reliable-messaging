@@ -2,11 +2,17 @@
 +++ b/client.go
 @@ -31 +30,0 @@
 -	"github.com/apache/rocketmq-clients/golang/v5/pkg/ticker"
-@@ -104,0 +104 @@
+@@ -86 +85,4 @@
+-		time.Sleep(time.Second)
++		select {
++		case <-cs.cli.done:
++		case <-time.After(time.Second):
++		}
+@@ -104,0 +107 @@
 +	cs.cli.sessionWG.Add(1)
-@@ -105,0 +106 @@
+@@ -105,0 +109 @@
 +		defer cs.cli.sessionWG.Done()
-@@ -123,2 +124,5 @@
+@@ -123,2 +127,5 @@
 -					cs.cli.startUpError = fmt.Errorf("failed to sync settings during startUp: %w", err)
 -					cs.cli.log.Error(cs.cli.startUpError)
 +					startupErr := fmt.Errorf("failed to sync settings during startUp: %w", err)
@@ -14,25 +20,25 @@
 +					cs.cli.startUpError = startupErr
 +					cs.cli.startUpErrorLock.Unlock()
 +					cs.cli.log.Error(startupErr)
-@@ -131 +135,5 @@
+@@ -131 +138,5 @@
 -					time.Sleep(cs.recoveryWaitTime)
 +					select {
 +					case <-cs.cli.done:
 +						return
 +					case <-time.After(cs.recoveryWaitTime):
 +					}
-@@ -240,0 +249,2 @@
+@@ -240,0 +252,2 @@
 +	startUpErrorLock              sync.Mutex
 +	sessionWG                     sync.WaitGroup
-@@ -546 +556,3 @@
+@@ -546 +559,3 @@
 -func (cli *defaultClient) startUp() error {
 +func (cli *defaultClient) startUp() error { return cli.startUpContext(context.Background()) }
 +
 +func (cli *defaultClient) startUpContext(ctx context.Context) error {
-@@ -554 +566 @@
+@@ -554 +569 @@
 -		_, err := cli.getMessageQueues(context.Background(), topic)
 +		_, err := cli.getMessageQueues(ctx, topic)
-@@ -602,3 +614,7 @@
+@@ -602,3 +617,7 @@
 -	ticker.Tick(f, time.Second*30, cli.done)
 -
 -	// wait syncSettings finish
@@ -43,7 +49,7 @@
 +	defer initialDeadline.Stop()
 +	poll := time.NewTicker(10 * time.Millisecond)
 +	defer poll.Stop()
-@@ -606,5 +622,15 @@
+@@ -606,5 +625,15 @@
 -		if cli.startUpError != nil {
 -			return cli.startUpError
 -		}
@@ -64,20 +70,20 @@
 +		if startupErr != nil {
 +			return startupErr
 +		}
-@@ -628,2 +654,2 @@
+@@ -628,2 +657,2 @@
 -func (cli *defaultClient) notifyClientTermination() {
 -	ctx := cli.Sign(context.Background())
 +func (cli *defaultClient) notifyClientTermination(ctx context.Context) {
 +	ctx = cli.Sign(ctx)
-@@ -650 +676,3 @@
+@@ -650 +679,3 @@
 -func (cli *defaultClient) GracefulStop() error {
 +func (cli *defaultClient) GracefulStop() error { return cli.gracefulStopContext(context.Background()) }
 +
 +func (cli *defaultClient) gracefulStopContext(ctx context.Context) error {
-@@ -654 +682 @@
+@@ -654 +685 @@
 -	cli.notifyClientTermination()
 +	cli.notifyClientTermination(ctx)
-@@ -661,0 +690 @@
+@@ -661,0 +693 @@
 +	cli.sessionWG.Wait()
 --- a/client_manager.go
 +++ b/client_manager.go

@@ -82,7 +82,10 @@ func (cs *defaultClientSession) _acquire_observer() (v2.MessagingService_Telemet
 	cs.observerLock.RUnlock()
 
 	if observer == nil {
-		time.Sleep(time.Second)
+		select {
+		case <-cs.cli.done:
+		case <-time.After(time.Second):
+		}
 		return nil, false
 	} else {
 		return observer, true

@@ -47,7 +47,7 @@
     "transaction-runtime.patch"
   ],
   "patched_sha256": {
-    "client.go": "bc91af75116e553114939c383ae54cf5694ede1344bfb3381e9804ba690a3e4e",
+    "client.go": "f3ebe774cd072ee8ff107eaa4c87bd5285e213d7a03979cad7bb1f1d9ea7a2be",
     "client_manager.go": "47d8110bd92821831c5f35ac18ca673eabc14cd99c2cbf4b1215dfd760677782",
     "client_manager_mock.go": "f60e472d5976e0ee2bd95edfc9103a658e6859ece93de038fedb5830c618997d",
     "client_mock.go": "06317cad9e81b3de1874f091a347f8826d2852b6972f7d21d8a66202316bf8f1",

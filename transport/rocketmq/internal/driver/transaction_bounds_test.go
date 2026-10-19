@@ -268,3 +268,18 @@ func TestTransactionSendDoesNotRetryAfterServerRetryOverride(t *testing.T) {
 		t.Fatalf("actual half RPC attempts=%d error=%v", service.sends.Load(), err)
 	}
 }
+
+func TestWaitingForAbsentObserverIsInterruptibleOnShutdown(t *testing.T) {
+	cli := &defaultClient{done: make(chan struct{})}
+	session := &defaultClientSession{cli: cli}
+	returned := make(chan struct{})
+	go func() { session._acquire_observer(); close(returned) }()
+	// Closing before or during the wait must interrupt it; neither schedule is
+	// allowed to retain the historical uninterruptible one-second sleep.
+	close(cli.done)
+	select {
+	case <-returned:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("absent observer prevented actual session drain")
+	}
+}
