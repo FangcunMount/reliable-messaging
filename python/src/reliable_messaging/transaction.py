@@ -251,6 +251,30 @@ class BranchResult:
     reference: Reference
     half: HalfOutcome
     final: FinalOutcome
+    broker_message_id: str = ""
+    broker_transaction_id: str = ""
+    error_code: str = ""
+
+
+@dataclass(frozen=True)
+class HalfReceipt:
+    outcome: HalfOutcome
+    broker_message_id: str = ""
+    broker_transaction_id: str = ""
+    error_code: str = ""
+
+    def __post_init__(self) -> None:
+        if (
+            self.outcome not in (HalfOutcome.PREPARED, HalfOutcome.REJECTED, HalfOutcome.UNKNOWN)
+            or len(self.broker_message_id.encode()) > 512
+            or len(self.broker_transaction_id.encode()) > 4096
+            or len(self.error_code.encode()) > 128
+            or (
+                self.outcome == HalfOutcome.PREPARED
+                and not (self.broker_message_id and self.broker_transaction_id)
+            )
+        ):
+            raise ValueError("invalid half receipt")
 
 
 @dataclass(frozen=True)
@@ -275,7 +299,9 @@ class SchemaError(ValueError):
 
 
 class ShutdownIncompleteError(RuntimeError):
-    pass
+    def __init__(self, message: str, counts: dict[str, int | bool] | None = None) -> None:
+        super().__init__(message)
+        self.counts = dict(counts or {})
 
 
 @dataclass(frozen=True)

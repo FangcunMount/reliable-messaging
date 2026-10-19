@@ -20,7 +20,9 @@ from reliable_messaging.transaction import (
     BindingError,
     Evidence,
     Execution,
+    FinalOutcome,
     FrozenPlan,
+    HalfReceipt,
     Reference,
     ReplanAuthorization,
     Request,
@@ -65,6 +67,111 @@ class MySQLTransactionStore:
         ):
             raise BindingError("binding exceeds binary schema limits")
         self.sessions, self.binding = sessions, binding
+
+    async def validate(self) -> None:
+        """Validate explicitly installed schema/binding; never execute DDL."""
+        async with self.sessions() as db, db.begin():
+            await self._binding(db, writer=True)
+            result = await db.execute(
+                text(
+                    "SELECT r.request_key,e.execution_key,w.reference,w.broker_message_id,"
+                    "w.half_outcome,w.final_outcome FROM rm_tx_request r,rm_tx_execution e,"
+                    "rm_tx_witness w WHERE FALSE"
+                )
+            )
+            result.close()
+
+    async def _receipt(
+        self, e: Execution, ref: Reference, values: dict[str, Any], *, final: bool
+    ) -> None:
+        if not e.owned or ref not in e.references or ref.owner != self.binding.owner:
+            raise BindingError("exact owned execution required")
+        async with self.sessions() as db, db.begin():
+            await self._binding(db, writer=False)
+            row = (
+                (
+                    await db.execute(
+                        text(
+                            "SELECT state,token FROM rm_tx_execution "
+                            "WHERE execution_key=:key FOR UPDATE"
+                        ),
+                        {"key": _key(e)},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            if bytes(row["token"]) != e.token:
+                raise StaleExecutionError("execution capability differs")
+            branch = (
+                (
+                    await db.execute(
+                        text(
+                            "SELECT state,reference FROM rm_tx_witness WHERE execution_key=:key "
+                            "AND branch_key=:branch FOR UPDATE"
+                        ),
+                        {"key": _key(e), "branch": branch_key(ref.branch_id)},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            state = State(_str(row["state"]))
+            if decode_reference(branch["reference"]) != ref or _str(branch["state"]) != state:
+                raise StaleExecutionError("branch proof differs")
+            if final:
+                outcome = values["outcome"]
+                if (
+                    state not in (State.COMMITTED, State.ABORTED)
+                    or (outcome == FinalOutcome.COMMIT_CONFIRMED and state != State.COMMITTED)
+                    or (outcome == FinalOutcome.ROLLBACK_CONFIRMED and state != State.ABORTED)
+                ):
+                    raise StaleExecutionError("final receipt contradicts local evidence")
+                sql = (
+                    "UPDATE rm_tx_witness SET final_outcome=:outcome,final_error_code=:code,"
+                    "final_recorded_at=UTC_TIMESTAMP(6) "
+                    "WHERE execution_key=:key AND branch_key=:branch"
+                )
+            else:
+                if state != State.PREPARED:
+                    raise StaleExecutionError("half audit requires prepared witness")
+                sql = (
+                    "UPDATE rm_tx_witness SET half_outcome=:outcome,broker_message_id=:message,"
+                    "broker_transaction_id=:transaction,half_error_code=:code,"
+                    "half_recorded_at=UTC_TIMESTAMP(6) "
+                    "WHERE execution_key=:key AND branch_key=:branch"
+                )
+            await db.execute(
+                text(sql), {**values, "key": _key(e), "branch": branch_key(ref.branch_id)}
+            )
+
+    async def record_half(self, e: Execution, ref: Reference, receipt: HalfReceipt) -> None:
+        await self._receipt(
+            e,
+            ref,
+            {
+                "outcome": receipt.outcome,
+                "message": receipt.broker_message_id.encode(),
+                "transaction": receipt.broker_transaction_id.encode(),
+                "code": receipt.error_code.encode(),
+            },
+            final=False,
+        )
+
+    async def record_final(
+        self, e: Execution, ref: Reference, outcome: FinalOutcome, code: str
+    ) -> None:
+        if (
+            outcome
+            not in (
+                FinalOutcome.COMMIT_CONFIRMED,
+                FinalOutcome.ROLLBACK_CONFIRMED,
+                FinalOutcome.UNKNOWN,
+            )
+            or len(code.encode()) > 128
+        ):
+            raise ValueError("invalid final receipt")
+        await self._receipt(e, ref, {"outcome": outcome, "code": code.encode()}, final=True)
 
     async def _binding(self, db: _DB, *, writer: bool) -> None:
         await _validate_root(db)
