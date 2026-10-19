@@ -26,7 +26,7 @@ M2两个Release各附相同的6个固定资产：wheel、sdist、uv.lock、trans
 
 发布前精确SHA的[源码/race/lint](https://github.com/FangcunMount/reliable-messaging/actions/runs/39222098471)、[三档真实存储](https://github.com/FangcunMount/reliable-messaging/actions/runs/39222116696)、[双Python源码及wheel](https://github.com/FangcunMount/reliable-messaging/actions/runs/39222109646)、[既有NSQ集成](https://github.com/FangcunMount/reliable-messaging/actions/runs/39222098378)全部通过。Python两档各120源码+120已安装wheel，0失败/跳过；[真实Broker完整48项/档](https://github.com/FangcunMount/infra/actions/runs/39222207821)及[普通消息/raw20/Go19回归](https://github.com/FangcunMount/infra/actions/runs/39222207962)通过。独立wheel/sdist安装各17包文件与固定源码一致，依赖全部符合uv.lock，receipt随Release保存。
 
-正式tag与下载制品的两档[安装及完整48项验收](https://github.com/FangcunMount/infra/actions/runs/39227465314)正在运行；完整结果确认前，不将源码CI或已发布等同最终重装验收完成。进度与唯一任务总表见[infra M2记录](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m2-execution.md)。
+正式tag与下载制品的两档[安装及完整48项验收](https://github.com/FangcunMount/infra/actions/runs/39227465314)全部通过，各48项、0失败/跳过，进程组/容器/私有目录全部排空。Go从正式tag下载模块，在模块缓存逐字节核验211个文件并构建实际验收程序；Python wheel/sdist各17包文件匹配固定源码、运行依赖均符合下载的uv.lock。实际执行的Go二进制摘要与安装证明一致，Python从隔离已安装wheel加载，无本地replace/editable或工作区源码导入。[发布后安装证明](https://github.com/FangcunMount/infra/blob/main/docs/server/evidence/rocketmq-m2-published-installation-20261019.json)与[唯一M2进度总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m2-execution.md)分别记录验收及任务合并状态。
 
 固定Broker5.5.1、Go底层5.1.4加可复现私有补丁、Python底层5.1.2。Go启动Telemetry共享RetryPolicy导致的protobuf大小不匹配已在发布前修复，并通过确定性快照、race及实际TLS交换回归。Broker回查有有限窗口；消费者仍需幂等，SDK不重复业务/模型调用、不自动降级NSQ/Outbox。本文不记录M3生产切换或三宿主业务采用。
 
