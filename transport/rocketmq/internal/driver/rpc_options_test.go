@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,21 @@ type routeServer struct {
 func (s *routeServer) QueryRoute(context.Context, *v2.QueryRouteRequest) (*v2.QueryRouteResponse, error) {
 	s.calls.Add(1)
 	return &v2.QueryRouteResponse{Status: &v2.Status{Code: v2.Code_OK}}, nil
+}
+
+func (s *routeServer) Telemetry(stream v2.MessagingService_TelemetryServer) error {
+	for {
+		command, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(command); err != nil {
+			return err
+		}
+	}
 }
 
 func TestClientRPCUsesConfiguredTLSAndInterceptor(t *testing.T) {
@@ -82,6 +98,26 @@ func TestClientRPCUsesConfiguredTLSAndInterceptor(t *testing.T) {
 			}
 			if !tc.wantError && intercepted.Load() != 1 {
 				t.Fatal("client interceptor did not reach real RPC")
+			}
+			if !tc.wantError {
+				stream, err := manager.Telemetry(ctx, endpoint, time.Second)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = stream.Send(&v2.TelemetryCommand{}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = stream.Recv(); err != nil {
+					t.Fatalf("stream canceled before RPC reader completed: %v", err)
+				}
+				if err = stream.CloseSend(); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case <-stream.Context().Done():
+				case <-time.After(time.Second):
+					t.Fatal("stream did not release its deadline on close")
+				}
 			}
 		})
 	}

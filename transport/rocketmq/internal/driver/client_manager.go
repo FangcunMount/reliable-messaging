@@ -234,7 +234,8 @@ func (cm *defaultClientManager) handleGrpcError(rpcClient RpcClient, err error) 
 	}
 }
 func (cm *defaultClientManager) QueryRoute(ctx context.Context, endpoints *v2.Endpoints, request *v2.QueryRouteRequest, duration time.Duration) (*v2.QueryRouteResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -245,7 +246,8 @@ func (cm *defaultClientManager) QueryRoute(ctx context.Context, endpoints *v2.En
 }
 
 func (cm *defaultClientManager) QueryAssignments(ctx context.Context, endpoints *v2.Endpoints, request *v2.QueryAssignmentRequest, duration time.Duration) (*v2.QueryAssignmentResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -256,7 +258,8 @@ func (cm *defaultClientManager) QueryAssignments(ctx context.Context, endpoints 
 }
 
 func (cm *defaultClientManager) SendMessage(ctx context.Context, endpoints *v2.Endpoints, request *v2.SendMessageRequest, duration time.Duration) (*v2.SendMessageResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -266,19 +269,44 @@ func (cm *defaultClientManager) SendMessage(ctx context.Context, endpoints *v2.E
 	return ret, err
 }
 
+// telemetryStream owns the deadline until the stream ends, rather than until
+// Telemetry returns. A unary-style deferred cancel would break the stream.
+type telemetryStream struct {
+	v2.MessagingService_TelemetryClient
+	cancel context.CancelFunc
+}
+
+func (s *telemetryStream) Recv() (*v2.TelemetryCommand, error) {
+	command, err := s.MessagingService_TelemetryClient.Recv()
+	if err != nil {
+		s.cancel()
+	}
+	return command, err
+}
+func (s *telemetryStream) CloseSend() error {
+	err := s.MessagingService_TelemetryClient.CloseSend()
+	s.cancel()
+	return err
+}
 func (cm *defaultClientManager) Telemetry(ctx context.Context, endpoints *v2.Endpoints, duration time.Duration) (v2.MessagingService_TelemetryClient, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	ret, err := rpcClient.Telemetry(ctx)
 	cm.handleGrpcError(rpcClient, err)
-	return ret, err
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return &telemetryStream{MessagingService_TelemetryClient: ret, cancel: cancel}, nil
 }
 
 func (cm *defaultClientManager) EndTransaction(ctx context.Context, endpoints *v2.Endpoints, request *v2.EndTransactionRequest, duration time.Duration) (*v2.EndTransactionResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -289,7 +317,8 @@ func (cm *defaultClientManager) EndTransaction(ctx context.Context, endpoints *v
 }
 
 func (cm *defaultClientManager) HeartBeat(ctx context.Context, endpoints *v2.Endpoints, request *v2.HeartbeatRequest, duration time.Duration) (*v2.HeartbeatResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -301,7 +330,8 @@ func (cm *defaultClientManager) HeartBeat(ctx context.Context, endpoints *v2.End
 }
 
 func (cm *defaultClientManager) NotifyClientTermination(ctx context.Context, endpoints *v2.Endpoints, request *v2.NotifyClientTerminationRequest, duration time.Duration) (*v2.NotifyClientTerminationResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -322,7 +352,8 @@ func (cm *defaultClientManager) ReceiveMessage(ctx context.Context, endpoints *v
 }
 
 func (cm *defaultClientManager) AckMessage(ctx context.Context, endpoints *v2.Endpoints, request *v2.AckMessageRequest, duration time.Duration) (*v2.AckMessageResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -333,7 +364,8 @@ func (cm *defaultClientManager) AckMessage(ctx context.Context, endpoints *v2.En
 }
 
 func (cm *defaultClientManager) ChangeInvisibleDuration(ctx context.Context, endpoints *v2.Endpoints, request *v2.ChangeInvisibleDurationRequest, duration time.Duration) (*v2.ChangeInvisibleDurationResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -344,7 +376,8 @@ func (cm *defaultClientManager) ChangeInvisibleDuration(ctx context.Context, end
 }
 
 func (cm *defaultClientManager) ForwardMessageToDeadLetterQueue(ctx context.Context, endpoints *v2.Endpoints, request *v2.ForwardMessageToDeadLetterQueueRequest, duration time.Duration) (*v2.ForwardMessageToDeadLetterQueueResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -355,7 +388,8 @@ func (cm *defaultClientManager) ForwardMessageToDeadLetterQueue(ctx context.Cont
 }
 func (cm *defaultClientManager) SyncLiteSubscription(ctx context.Context, endpoints *v2.Endpoints, request *v2.SyncLiteSubscriptionRequest,
 	duration time.Duration) (*v2.SyncLiteSubscriptionResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err
@@ -366,7 +400,8 @@ func (cm *defaultClientManager) SyncLiteSubscription(ctx context.Context, endpoi
 }
 
 func (cm *defaultClientManager) RecallMessage(ctx context.Context, endpoints *v2.Endpoints, request *v2.RecallMessageRequest, duration time.Duration) (*v2.RecallMessageResponse, error) {
-	ctx, _ = context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
 	rpcClient, err := cm.getRpcClient(endpoints)
 	if err != nil {
 		return nil, err

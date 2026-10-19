@@ -8,3 +8,13 @@ linters:
     - ineffassign
     - staticcheck
     - unused
+  exclusions:
+    rules:
+      # Pinned Apache snapshot: retain upstream APIs and generated mocks;
+      # do not hide govet or correctness diagnostics in the maintained patch.
+      - path: transport/rocketmq/internal/driver/
+        linters: [staticcheck]
+        text: 'SA1019|QF1008'
+      - path: transport/rocketmq/internal/driver/(client_mock|client_manager|push_consumer)\.go
+        linters: [unused]
+        text: 'MockisClient|shutdown|getSubscriptionTopicRouteResult'

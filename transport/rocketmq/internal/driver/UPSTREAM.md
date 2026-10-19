@@ -14,6 +14,9 @@ The same omission prevents connection interceptors from observing real RPCs.
 The local patch carries per-client connection and RPC options into that client's
 manager and into each real RPC connection. No process-wide factory is replaced.
 TLS trust, hostname rejection and interceptor execution are covered by an actual
-TLS gRPC server test. Broker acceptance separately covers both normal and
+TLS gRPC server test. Unary RPC/dial deadlines release their cancellation
+resources; telemetry keeps its deadline until stream failure or close. The
+stream regression test ensures it is not canceled when its factory returns.
+Broker acceptance separately covers both normal and
 transactional messages. Keep this snapshot private; remove it when a reviewed,
 fixed upstream release can pass the same gates.

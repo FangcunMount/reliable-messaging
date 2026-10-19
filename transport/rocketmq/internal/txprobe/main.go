@@ -247,11 +247,12 @@ func run() error {
 		emit("finalization_unknown", *id, "response_discarded_after_real_rpc")
 		os.Exit(24)
 	}
-	if action == "rollback" {
+	switch action {
+	case "rollback":
 		err = tx.RollBack()
-	} else if action == "commit" {
+	case "commit":
 		err = tx.Commit()
-	} else {
+	default:
 		return errors.New("invalid action")
 	}
 	if err != nil {

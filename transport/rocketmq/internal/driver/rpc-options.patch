@@ -22,6 +22,92 @@
 @@ -215 +217 @@
 -	rpcClient, err := NewRpcClient(target)
 +	rpcClient, err := NewRpcClient(target, cm.rpcOptions...)
+@@ -235 +237,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -246 +249,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -257 +261,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -266,0 +272,19 @@
++// telemetryStream owns the deadline until the stream ends, rather than until
++// Telemetry returns. A unary-style deferred cancel would break the stream.
++type telemetryStream struct {
++	v2.MessagingService_TelemetryClient
++	cancel context.CancelFunc
++}
++
++func (s *telemetryStream) Recv() (*v2.TelemetryCommand, error) {
++	command, err := s.MessagingService_TelemetryClient.Recv()
++	if err != nil {
++		s.cancel()
++	}
++	return command, err
++}
++func (s *telemetryStream) CloseSend() error {
++	err := s.MessagingService_TelemetryClient.CloseSend()
++	s.cancel()
++	return err
++}
+@@ -268,3 +292,4 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
+-	rpcClient, err := cm.getRpcClient(endpoints)
+-	if err != nil {
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	rpcClient, err := cm.getRpcClient(endpoints)
++	if err != nil {
++		cancel()
+@@ -275 +300,5 @@
+-	return ret, err
++	if err != nil {
++		cancel()
++		return nil, err
++	}
++	return &telemetryStream{MessagingService_TelemetryClient: ret, cancel: cancel}, nil
+@@ -279 +308,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -290 +320,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -302 +333,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -323 +355,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -334 +367,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -345 +379,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -356 +391,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -367 +403,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+--- a/conn.go
++++ b/conn.go
+@@ -144 +144,3 @@
+-		dctx, _ = context.WithTimeout(c.ctx, c.opts.DialTimeout)
++		var cancel context.CancelFunc
++		dctx, cancel = context.WithTimeout(c.ctx, c.opts.DialTimeout)
++		defer cancel()
 --- a/conn_options.go
 +++ b/conn_options.go
 @@ -71 +71 @@
