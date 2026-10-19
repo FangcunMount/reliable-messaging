@@ -10,6 +10,12 @@
 @@ -542 +548 @@
 -	cm := NewDefaultClientManager()
 +	cm := cli.newClientManager()
+@@ -652 +657,0 @@
+-	cli.done <- struct{}{}
+@@ -653,0 +659,3 @@
++	if manager, ok := cli.clientManager.(*defaultClientManager); ok {
++		manager.shutdown()
++	}
 --- a/client_manager.go
 +++ b/client_manager.go
 @@ -88,0 +89 @@
@@ -19,22 +25,24 @@
 +var NewDefaultClientManager = func(opts ...RpcClientOption) *defaultClientManager {
 @@ -97,0 +99 @@
 +		rpcOptions:     append([]RpcClientOption(nil), opts...),
-@@ -215 +217 @@
+@@ -175 +176,0 @@
+-	cm.done <- struct{}{}
+@@ -215 +216 @@
 -	rpcClient, err := NewRpcClient(target)
 +	rpcClient, err := NewRpcClient(target, cm.rpcOptions...)
-@@ -235 +237,2 @@
+@@ -235 +236,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -246 +249,2 @@
+@@ -246 +248,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -257 +261,2 @@
+@@ -257 +260,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -266,0 +272,19 @@
+@@ -266,0 +271,19 @@
 +// telemetryStream owns the deadline until the stream ends, rather than until
 +// Telemetry returns. A unary-style deferred cancel would break the stream.
 +type telemetryStream struct {
@@ -54,7 +62,7 @@
 +	s.cancel()
 +	return err
 +}
-@@ -268,3 +292,4 @@
+@@ -268,3 +291,4 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 -	rpcClient, err := cm.getRpcClient(endpoints)
 -	if err != nil {
@@ -62,42 +70,42 @@
 +	rpcClient, err := cm.getRpcClient(endpoints)
 +	if err != nil {
 +		cancel()
-@@ -275 +300,5 @@
+@@ -275 +299,5 @@
 -	return ret, err
 +	if err != nil {
 +		cancel()
 +		return nil, err
 +	}
 +	return &telemetryStream{MessagingService_TelemetryClient: ret, cancel: cancel}, nil
-@@ -279 +308,2 @@
+@@ -279 +307,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -290 +320,2 @@
+@@ -290 +319,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -302 +333,2 @@
+@@ -302 +332,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -323 +355,2 @@
+@@ -323 +354,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -334 +367,2 @@
+@@ -334 +366,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -345 +379,2 @@
+@@ -345 +378,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -356 +391,2 @@
+@@ -356 +390,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()
-@@ -367 +403,2 @@
+@@ -367 +402,2 @@
 -	ctx, _ = context.WithTimeout(ctx, duration)
 +	ctx, cancel := context.WithTimeout(ctx, duration)
 +	defer cancel()

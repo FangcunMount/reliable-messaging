@@ -46,8 +46,8 @@
     "rpc-options.patch"
   ],
   "patched_sha256": {
-    "client.go": "7642f5a90e95a520ef519a60df4ef3880c31b1da1d2d368234f000ccf100968d",
-    "client_manager.go": "87d44eab1b2a795df614ec147b538e3e539d07626b5323dc1c8e77c084bb10a6",
+    "client.go": "c30037533e05896e4564c7ee5d773ef842b16778af61d00ad78df81c2dec9f33",
+    "client_manager.go": "f25a3b1f6559134d41466810394370a6de6bb74ab0fac8b1c42c39750ddde5e3",
     "client_manager_mock.go": "f60e472d5976e0ee2bd95edfc9103a658e6859ece93de038fedb5830c618997d",
     "client_mock.go": "06317cad9e81b3de1874f091a347f8826d2852b6972f7d21d8a66202316bf8f1",
     "client_options.go": "dfc39180a3e6e7ff73bef35e2b6c081b8b146e3ff7b28ef3243e9890802d726d",

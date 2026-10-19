@@ -655,8 +655,10 @@ func (cli *defaultClient) GracefulStop() error {
 	if cli.clientManager != nil {
 		cli.clientManager.UnRegisterClient(cli)
 	}
-	cli.done <- struct{}{}
 	close(cli.done)
+	if manager, ok := cli.clientManager.(*defaultClientManager); ok {
+		manager.shutdown()
+	}
 	cli.clientMeterProvider.Reset(&v2.Metric{
 		On: false,
 	})

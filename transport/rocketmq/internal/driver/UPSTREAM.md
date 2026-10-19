@@ -20,3 +20,8 @@ stream regression test ensures it is not canceled when its factory returns.
 Broker acceptance separately covers both normal and
 transactional messages. Keep this snapshot private; remove it when a reviewed,
 fixed upstream release can pass the same gates.
+
+Startup failure shutdown broadcasts channel closure and closes its RPC manager;
+it must not wait for an absent unbuffered channel reader. The TLS rejection test
+also checks that startup returns within its bounded failure budget. Full worker
+join/transaction callback saturation proofs remain later M2 work.

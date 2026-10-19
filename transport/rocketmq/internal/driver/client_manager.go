@@ -174,7 +174,6 @@ func (cm *defaultClientManager) syncSettings() {
 }
 func (cm *defaultClientManager) shutdown() {
 	sugarBaseLogger.Info("begin to shutdown the client manager")
-	cm.done <- struct{}{}
 	close(cm.done)
 	cm.cleanRpcClient()
 	sugarBaseLogger.Info("shutdown the client manager successfully")

@@ -124,4 +124,25 @@ func TestClientRPCUsesConfiguredTLSAndInterceptor(t *testing.T) {
 	if service.calls.Load() != 1 {
 		t.Fatalf("untrusted TLS reached server; calls=%d", service.calls.Load())
 	}
+	// Rejected TLS can fail before any client loop reads done. Shutdown must
+	// broadcast close, not block sending to an unbuffered channel with no reader.
+	producer, err := NewProducer(&Config{Endpoint: listener.Addr().String()},
+		WithTopics("untrusted"), WithClientFunc(func(c *Config, opts ...ClientOption) (Client, error) {
+			return NewClient(c, append(opts, WithConnOptions(
+				WithTLSConfig(&tls.Config{RootCAs: x509.NewCertPool(), MinVersion: tls.VersionTLS12}),
+				WithDialTimeout(150*time.Millisecond)))...)
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- producer.Start() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("untrusted producer started")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("TLS startup failure blocked in shutdown")
+	}
 }
