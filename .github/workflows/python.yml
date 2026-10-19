@@ -42,6 +42,7 @@ jobs:
       RM_MQ_DURABLE_TEST_DSN: 'm7:m7_disposable_only@tcp(127.0.0.1:3306)/rm_m7?parseTime=true'
       RM_MQ_NSQ_TCP: 127.0.0.1:4150
       RM_MQ_NSQ_HTTP: http://127.0.0.1:4151
+      RM_TX_DISPOSABLE: ${{ github.run_id }}-${{ strategy.job-index }}
     steps:
       - uses: actions/checkout@v4
         with:

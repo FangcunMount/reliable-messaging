@@ -325,8 +325,13 @@ class Execution:
             raise ValueError("positive signed-int64-compatible fence required")
         _required(self.writer_epoch)
         object.__setattr__(self, "token", _hash(self.token))
-        if not any(self.token) or self.lease_until.tzinfo is None:
-            raise ValueError("execution capability and timezone-aware lease required")
+        if self.lease_until.tzinfo is None:
+            raise ValueError("timezone-aware lease required")
+
+    @property
+    def owned(self) -> bool:
+        """Observed executions carry a zero capability and cannot execute/abort."""
+        return any(self.token)
 
     @property
     def references(self) -> tuple[Reference, ...]:
