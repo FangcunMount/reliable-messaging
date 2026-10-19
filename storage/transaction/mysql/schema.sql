@@ -33,5 +33,13 @@ CREATE TABLE rm_tx_witness (
  branch_key BINARY(32) NOT NULL,
  reference BLOB NOT NULL,
  state VARBINARY(16) NOT NULL,
+ broker_message_id VARBINARY(512) NULL,
+ broker_transaction_id VARBINARY(4096) NULL,
+ half_outcome VARBINARY(16) NOT NULL DEFAULT 'not_attempted',
+ final_outcome VARBINARY(32) NOT NULL DEFAULT 'not_attempted',
+ half_error_code VARBINARY(128) NOT NULL DEFAULT '',
+ final_error_code VARBINARY(128) NOT NULL DEFAULT '',
+ half_recorded_at DATETIME(6) NULL,
+ final_recorded_at DATETIME(6) NULL,
  PRIMARY KEY(execution_key,branch_key)
 ) ENGINE=InnoDB;

@@ -358,6 +358,47 @@ func TestOriginalMongoTransactionProofs(t *testing.T) {
 			t.Fatal("observer gained send capability", err)
 		}
 	})
+	t.Run("receipt metadata does not replace witness or prevent abort", func(t *testing.T) {
+		e := reserve(t, s, "receipts")
+		ref := e.References()[0]
+		if err := s.Validate(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.BeginPrepare(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordHalf(ctx, e, ref, transaction.HalfReceipt{Outcome: transaction.HalfPrepared, BrokerMessageID: "synthetic-broker-id", BrokerTransactionID: "synthetic-broker-tx"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordHalf(ctx, e, ref, transaction.HalfReceipt{Outcome: transaction.HalfPrepared, BrokerMessageID: "different-broker-id", BrokerTransactionID: "synthetic-broker-tx"}); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("Broker identity overwritten", err)
+		}
+		if err := s.RecordHalf(ctx, e, ref, transaction.HalfReceipt{Outcome: transaction.HalfUnknown}); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("positive half audit downgraded", err)
+		}
+		assertDecision(t, s, e, transaction.Unknown)
+		if err := s.RecordFinal(ctx, e, ref, transaction.FinalCommitConfirmed, ""); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("metadata invented local commit", err)
+		}
+		if ok, err := s.Abort(ctx, e); err != nil || !ok {
+			t.Fatal("metadata prevented durable abort", err)
+		}
+		if err := s.RecordFinal(ctx, e, ref, transaction.FinalRollbackConfirmed, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordFinal(ctx, e, ref, transaction.FinalUnknown, "late_timeout"); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("positive final audit downgraded", err)
+		}
+		assertDecision(t, s, e, transaction.Rollback)
+		ek := key(e)
+		var d executionDoc
+		if err := db.Collection("rm_tx_execution").FindOne(ctx, bson.M{"_id": ek[:]}).Decode(&d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Branches[0].BrokerMessageID != "synthetic-broker-id" || d.Branches[0].Final != transaction.FinalRollbackConfirmed {
+			t.Fatal("audit state lost")
+		}
+	})
 	t.Run("missing original session and wrong store fail closed", func(t *testing.T) {
 		e := reserve(t, s, "wrong")
 		if _, err := s.Bind(nil, e); !errors.Is(err, transaction.ErrTransactionRequired) {

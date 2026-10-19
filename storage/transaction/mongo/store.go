@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/FangcunMount/reliable-messaging/transaction"
@@ -24,8 +25,16 @@ type Store struct {
 var _ transaction.AuthorizedStore = (*Store)(nil)
 
 type branchDoc struct {
-	Reference []byte            `bson:"reference"`
-	State     transaction.State `bson:"state"`
+	Reference           []byte                   `bson:"reference"`
+	State               transaction.State        `bson:"state"`
+	BrokerMessageID     string                   `bson:"broker_message_id,omitempty"`
+	BrokerTransactionID string                   `bson:"broker_transaction_id,omitempty"`
+	Half                transaction.HalfOutcome  `bson:"half_outcome,omitempty"`
+	Final               transaction.FinalOutcome `bson:"final_outcome,omitempty"`
+	HalfError           string                   `bson:"half_error_code,omitempty"`
+	FinalError          string                   `bson:"final_error_code,omitempty"`
+	HalfAt              time.Time                `bson:"half_recorded_at,omitempty"`
+	FinalAt             time.Time                `bson:"final_recorded_at,omitempty"`
 }
 type executionDoc struct {
 	ID             []byte            `bson:"_id"`
@@ -188,7 +197,7 @@ func (s *Store) newDoc(ctx context.Context, p transaction.FrozenPlan, fence uint
 		if err != nil {
 			return d, e, err
 		}
-		d.Branches = append(d.Branches, branchDoc{raw, transaction.Prepared})
+		d.Branches = append(d.Branches, branchDoc{Reference: raw, State: transaction.Prepared})
 	}
 	return d, e, nil
 }
@@ -287,17 +296,18 @@ func (s *Store) abort(ctx context.Context, e transaction.Execution, expired bool
 	}
 	ek, digest := key(e), e.Plan.Digest()
 	filter := bson.M{"_id": ek[:], "state": transaction.Prepared, "token": e.Token[:], "plan_digest": digest[:]}
-	var expected []branchDoc
-	for _, ref := range e.References() {
+	for i, ref := range e.References() {
 		raw, err := transaction.EncodeReference(ref)
 		if err != nil {
 			return false, err
 		}
-		expected = append(expected, branchDoc{raw, transaction.Prepared})
+		filter[fmt.Sprintf("witnesses.%d.reference", i)] = raw
+		filter[fmt.Sprintf("witnesses.%d.state", i)] = transaction.Prepared
 	}
-	filter["witnesses"] = expected
+	size := bson.M{"$eq": bson.A{bson.M{"$size": "$witnesses"}, len(e.References())}}
+	filter["$expr"] = size
 	if expired {
-		filter["$expr"] = bson.M{"$lte": bson.A{"$lease_until", "$$NOW"}}
+		filter["$expr"] = bson.M{"$and": bson.A{size, bson.M{"$lte": bson.A{"$lease_until", "$$NOW"}}}}
 	}
 	result, err := s.db.Collection("rm_tx_execution").UpdateOne(ctx, filter, bson.M{"$set": bson.M{"state": transaction.Aborted, "witnesses.$[].state": transaction.Aborted}, "$inc": bson.M{"guard_version": 1}})
 	if err != nil {

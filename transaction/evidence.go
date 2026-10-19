@@ -109,9 +109,11 @@ const (
 // Result keeps the three producer phases separate. Even LocalCommitted and
 // FinalCommitConfirmed do not report consumer effects or business receipts.
 type BranchResult struct {
-	Reference Reference
-	Half      HalfOutcome
-	Final     FinalOutcome
+	Reference                            Reference
+	Half                                 HalfOutcome
+	Final                                FinalOutcome
+	BrokerMessageID, BrokerTransactionID string
+	ErrorCode                            string
 }
 type Result struct {
 	Local    LocalOutcome

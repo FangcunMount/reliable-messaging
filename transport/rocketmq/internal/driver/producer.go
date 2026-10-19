@@ -228,7 +228,10 @@ func (p *defaultProducer) send1(ctx context.Context, topic string, messageType v
 		messageHookPointsStatus = MessageHookPointsStatus_ERROR
 	}
 	p.cli.doAfter(MessageHookPoints_SEND, messageCommons, duration, messageHookPointsStatus)
-	maxAttempts := p.getRetryMaxAttempts()
+	maxAttempts := 1
+	if messageType != v2.MessageType_TRANSACTION {
+		maxAttempts = p.getRetryMaxAttempts()
+	}
 	if err != nil {
 		messageIds := make([]string, 0)
 		for _, pubMessage := range pubMessages {
@@ -329,7 +332,11 @@ func (p *defaultProducer) send0(ctx context.Context, msgs []*UnifiedMessage, txE
 	}
 	var candidates []*v2.MessageQueue
 	if messageGroup == nil {
-		candidates, err = p.takeMessageQueues(pubLoadBalancer)
+		if messageType == v2.MessageType_TRANSACTION {
+			candidates, err = pubLoadBalancer.TakeMessageQueues(&p.isolated, 1)
+		} else {
+			candidates, err = p.takeMessageQueues(pubLoadBalancer)
+		}
 	} else {
 		candidates, err = pubLoadBalancer.TakeMessageQueueByMessageGroup(messageGroup)
 	}
@@ -412,7 +419,10 @@ func (p *defaultProducer) SendWithTransaction(ctx context.Context, msg *Message,
 	if !p.isOn() {
 		return nil, fmt.Errorf("producer is not running")
 	}
-	t := transaction.(*transactionImpl)
+	t, ok := transaction.(*transactionImpl)
+	if !ok || t == nil {
+		return nil, fmt.Errorf("foreign transaction handle")
+	}
 	pubMessage, err := t.tryAddMessage(msg, p.cli.config.NameSpace)
 	if err != nil {
 		return nil, err
@@ -424,11 +434,13 @@ func (p *defaultProducer) SendWithTransaction(ctx context.Context, msg *Message,
 	if err != nil {
 		return nil, err
 	}
-	err2 := t.tryAddReceipt(pubMessage, resp[0])
-	if err2 != nil {
-		p.cli.log.Error(err2)
+	if len(resp) != 1 || resp[0] == nil || resp[0].MessageID == "" || resp[0].TransactionId == "" {
+		return nil, fmt.Errorf("transaction half receipt incomplete")
 	}
-	return resp, err
+	if err = t.tryAddReceipt(pubMessage, resp[0]); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (p *defaultProducer) GracefulStop() error {
