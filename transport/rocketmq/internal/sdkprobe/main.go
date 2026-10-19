@@ -283,6 +283,12 @@ func run() error {
 		if err := sender.Close(closeCtx); err != nil {
 			return err
 		}
+		stats := sender.Stats()
+		if !stats.Stopped || stats.ActiveSends != 0 || stats.RunningChecks != 0 || stats.QueuedChecks != 0 {
+			return errors.New("actual SDK resources remain after close")
+		}
+		rawStats, _ := json.Marshal(stats)
+		emit("metrics", *id, string(rawStats))
 		emit("closed", *id, "drained")
 		return nil
 	}

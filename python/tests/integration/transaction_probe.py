@@ -246,6 +246,15 @@ async def run(args):
             else:
                 emit("finalized", identity, result.local)
         await sender.close(grace_seconds=15)
+        stats = sender.stats()
+        if (
+            not stats["stopped"]
+            or stats["active_sends"]
+            or stats["pending_calls"]
+            or stats["pending_checks"]
+        ):
+            raise RuntimeError("actual SDK resources remain after close")
+        emit("metrics", args.id, json.dumps(stats))
         emit("closed", args.id, "drained")
     finally:
         # Never dispose a host pool while SDK resources are still running.
