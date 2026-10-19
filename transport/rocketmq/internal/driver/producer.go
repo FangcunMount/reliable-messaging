@@ -228,7 +228,10 @@ func (p *defaultProducer) send1(ctx context.Context, topic string, messageType v
 		messageHookPointsStatus = MessageHookPointsStatus_ERROR
 	}
 	p.cli.doAfter(MessageHookPoints_SEND, messageCommons, duration, messageHookPointsStatus)
-	maxAttempts := p.getRetryMaxAttempts()
+	maxAttempts := 1
+	if messageType != v2.MessageType_TRANSACTION {
+		maxAttempts = p.getRetryMaxAttempts()
+	}
 	if err != nil {
 		messageIds := make([]string, 0)
 		for _, pubMessage := range pubMessages {
@@ -329,7 +332,11 @@ func (p *defaultProducer) send0(ctx context.Context, msgs []*UnifiedMessage, txE
 	}
 	var candidates []*v2.MessageQueue
 	if messageGroup == nil {
-		candidates, err = p.takeMessageQueues(pubLoadBalancer)
+		if messageType == v2.MessageType_TRANSACTION {
+			candidates, err = pubLoadBalancer.TakeMessageQueues(&p.isolated, 1)
+		} else {
+			candidates, err = p.takeMessageQueues(pubLoadBalancer)
+		}
 	} else {
 		candidates, err = pubLoadBalancer.TakeMessageQueueByMessageGroup(messageGroup)
 	}
