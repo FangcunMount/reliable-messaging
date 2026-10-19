@@ -31,11 +31,11 @@ type Reference struct {
 }
 
 func (r Reference) Valid() bool {
-	return r.Fence > 0 && required(r.Owner, r.Scope, r.OperationID, r.BranchID, r.MessageID, r.LogicalTopic, r.PhysicalTopic, r.RouteRevision, r.WriterEpoch)
+	return r.Fence > 0 && r.Fence <= MaxFence && required(r.Owner, r.Scope, r.OperationID, r.BranchID, r.MessageID, r.LogicalTopic, r.PhysicalTopic, r.RouteRevision, r.WriterEpoch)
 }
 
 func (p FrozenPlan) Reference(branchID string, fence uint64, epoch string) (Reference, error) {
-	if !p.Valid() || fence == 0 || !required(epoch) {
+	if !p.Valid() || fence == 0 || fence > MaxFence || !required(epoch) {
 		return Reference{}, ErrInvalidPlan
 	}
 	for _, branch := range p.input.Branches {
