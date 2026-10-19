@@ -87,7 +87,7 @@ infra 的 v2 manifest 显式列出 type/owner/revision；既有 Topic 类型、�
 
 RocketMQ 原生回查有限，参数须从部署回读；配置乘积不是恢复 SLA。数据库持续故障、回查饱和、Unknown 增长或实际原生超限应告警。宿主明确调用 StopAdmission 保护新事务，保留原 Checker、证据及运维审计；不能自动降级 NSQ/Outbox 或把 Unknown 改写为已回滚。
 
-infra `scripts/rocketmq/audit_transaction_limit.py` 只读查询固定5.5.1原生 `TRANS_CHECK_MAX_TIME_TOPIC` 索引，按明确 Compose project 校验容器，独占创建0600文件。导出 Broker ID、索引位置、键 hash及原管理输出 hash，不读取正文，不修改消息/业务/witness。原生超限不授权重新执行业务；需宿主结合原计划、数据库证据与 Broker 存储情况人工决定恢复，不在 Checker 内补发。
+infra `scripts/rocketmq/audit_transaction_limit.py` 只读查询固定5.5.1原生 `TRANS_CHECK_MAX_TIME_TOPIC` 索引，按明确 Compose project 校验容器，独占创建0600文件。导出 Broker ID、索引位置、键 hash及原管理输出 hash，不导出正文，不修改消息/业务/witness。原生超限不授权重新执行业务；需宿主结合原计划、数据库证据与 Broker 存储情况人工决定恢复，不在 Checker 内补发。
 
 ## 验证与发布门禁
 
