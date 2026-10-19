@@ -80,6 +80,12 @@ func TestRPCFaultActuallyClosesTLSConnectionAfterBackendAck(t *testing.T) {
 	if err == nil || service.sent.Load() != 1 {
 		t.Fatal("successful backend reply reached client despite TCP fault", err)
 	}
+	// The client can observe socket closure BEFORE the server handler has
+	// recorded its post-close audit. Join the real handler before inspecting
+	// counters; stopping now cannot cause the already-observed RPC error.
+	if err = closeProxy(); err != nil {
+		t.Fatal(err)
+	}
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
 	if fixture.dropped != 1 || fixture.acks != 1 {
