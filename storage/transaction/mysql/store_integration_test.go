@@ -310,6 +310,36 @@ func TestOriginalTransactionAndReservationProofs(t *testing.T) {
 		}
 		assertDecision(t, s, e, transaction.Rollback)
 	})
+	t.Run("prepare admission consumes capability once before broker IO", func(t *testing.T) {
+		e := reserve(t, s, "prepare-once")
+		const count = 10
+		var wg sync.WaitGroup
+		results := make(chan error, count)
+		for i := 0; i < count; i++ {
+			wg.Add(1)
+			go func() { defer wg.Done(); results <- s.BeginPrepare(ctx, e) }()
+		}
+		wg.Wait()
+		close(results)
+		winners := 0
+		for err := range results {
+			if err == nil {
+				winners++
+			} else if !errors.Is(err, transaction.ErrStaleExecution) {
+				t.Fatal(err)
+			}
+		}
+		if winners != 1 {
+			t.Fatal("prepare admission winners", winners)
+		}
+		observed, err := s.Lookup(ctx, transaction.RequestFor(e.Plan))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = s.BeginPrepare(ctx, observed.Execution); !errors.Is(err, transaction.ErrBinding) {
+			t.Fatal("observer gained send capability", err)
+		}
+	})
 	t.Run("schema and store identity fail closed", func(t *testing.T) {
 		wrong, err := New(db, transaction.Binding{Owner: "test.mysql", StoreID: "wrong", WriterEpoch: "epoch"})
 		if err != nil {

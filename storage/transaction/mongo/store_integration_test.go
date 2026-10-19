@@ -325,6 +325,22 @@ func TestOriginalMongoTransactionProofs(t *testing.T) {
 		}
 		assertDecision(t, s, e, transaction.Rollback)
 	})
+	t.Run("prepare admission is durable and one shot", func(t *testing.T) {
+		e := reserve(t, s, "prepare-once")
+		if err := s.BeginPrepare(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.BeginPrepare(ctx, e); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal(err)
+		}
+		observed, err := s.Lookup(ctx, transaction.RequestFor(e.Plan))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = s.BeginPrepare(ctx, observed.Execution); !errors.Is(err, transaction.ErrBinding) {
+			t.Fatal("observer gained send capability", err)
+		}
+	})
 	t.Run("missing original session and wrong store fail closed", func(t *testing.T) {
 		e := reserve(t, s, "wrong")
 		if _, err := s.Bind(nil, e); !errors.Is(err, transaction.ErrTransactionRequired) {

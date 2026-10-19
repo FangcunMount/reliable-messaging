@@ -25,6 +25,7 @@ CREATE TABLE rm_tx_execution (
  state VARBINARY(16) NOT NULL,
  lease_until DATETIME(6) NOT NULL,
  guard_version BIGINT NOT NULL DEFAULT 0,
+ prepare_started BOOLEAN NOT NULL DEFAULT FALSE,
  INDEX rm_tx_expiry(owner,state,lease_until)
 ) ENGINE=InnoDB;
 CREATE TABLE rm_tx_witness (

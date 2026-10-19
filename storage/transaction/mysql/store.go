@@ -217,6 +217,44 @@ func (s *Store) Evidence(ctx context.Context, ref transaction.Reference) (*trans
 	return &e, err
 }
 
+func (s *Store) BeginPrepare(ctx context.Context, e transaction.Execution) error {
+	if !e.Valid() || e.Plan.Input().Owner != s.binding.Owner || e.WriterEpoch != s.binding.WriterEpoch {
+		return transaction.ErrBinding
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = s.bindingIn(ctx, tx, true); err != nil {
+		return err
+	}
+	ek := key(e)
+	res, err := tx.ExecContext(ctx, `UPDATE rm_tx_execution SET prepare_started=TRUE WHERE execution_key=? AND token=? AND state='prepared' AND prepare_started=FALSE AND lease_until>UTC_TIMESTAMP(6)`, ek[:], e.Token[:])
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return transaction.ErrStaleExecution
+	}
+	var raw []byte
+	if err = tx.QueryRowContext(ctx, `SELECT plan FROM rm_tx_execution WHERE execution_key=?`, ek[:]).Scan(&raw); err != nil {
+		return err
+	}
+	stored, err := transaction.DecodePlan(raw)
+	if err != nil {
+		return err
+	}
+	if stored.Digest() != e.Plan.Digest() {
+		return transaction.ErrStaleExecution
+	}
+	return tx.Commit()
+}
+
 func (s *Store) Abort(ctx context.Context, e transaction.Execution) (bool, error) {
 	return s.abort(ctx, e, false)
 }

@@ -246,3 +246,17 @@ async def test_missing_expired_and_wrong_identity_remain_unknown(fixture):
     assert await decision(store, e) == Decision.ROLLBACK
     wrong = dataclasses.replace(e.references[0], writer_epoch="wrong")
     assert await StoreChecker(store).check(wrong) == Decision.UNKNOWN
+
+
+async def test_prepare_admission_is_durable_and_one_shot(fixture):
+    _, _, store = fixture
+    e = await reserve(store, "prepare-once")
+    await store.begin_prepare(e)
+    with pytest.raises(StaleExecutionError):
+        await store.begin_prepare(e)
+    observed = await store.lookup(
+        Request(e.plan.owner, e.plan.scope, e.plan.idempotency_key, e.plan.input_hash)
+    )
+    assert observed is not None and not observed.execution.owned
+    with pytest.raises(BindingError):
+        await store.begin_prepare(observed.execution)

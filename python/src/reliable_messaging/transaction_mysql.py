@@ -215,6 +215,29 @@ class MySQLTransactionStore:
                 ) from error
             return observed
 
+    async def begin_prepare(self, e: Execution) -> None:
+        if (
+            not e.owned
+            or e.plan.owner != self.binding.owner
+            or e.writer_epoch != self.binding.writer_epoch
+        ):
+            raise BindingError("owned execution with active writer epoch required")
+        async with self.sessions() as db, db.begin():
+            await self._binding(db, writer=True)
+            result = await db.execute(
+                text(
+                    "UPDATE rm_tx_execution SET prepare_started=TRUE WHERE execution_key=:key "
+                    "AND token=:token AND state='prepared' AND prepare_started=FALSE "
+                    "AND lease_until>UTC_TIMESTAMP(6)"
+                ),
+                {"key": _key(e), "token": e.token},
+            )
+            if cast(CursorResult[Any], result).rowcount != 1:
+                raise StaleExecutionError("prepare capability already consumed or expired")
+            stored = await self._load(db, _key(e), capability=True)
+            if stored.execution.plan.digest != e.plan.digest:
+                raise StaleExecutionError("frozen plan differs")
+
     async def evidence(self, reference: Reference) -> Evidence | None:
         if reference.owner != self.binding.owner:
             raise BindingError("owner differs")

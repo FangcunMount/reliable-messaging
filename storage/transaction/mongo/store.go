@@ -28,18 +28,19 @@ type branchDoc struct {
 	State     transaction.State `bson:"state"`
 }
 type executionDoc struct {
-	ID       []byte            `bson:"_id"`
-	Request  []byte            `bson:"request_key"`
-	Owner    string            `bson:"owner"`
-	Plan     []byte            `bson:"plan"`
-	Digest   []byte            `bson:"plan_digest"`
-	Fence    int64             `bson:"fence"`
-	Epoch    string            `bson:"writer_epoch"`
-	Token    []byte            `bson:"token"`
-	Lease    time.Time         `bson:"lease_until"`
-	State    transaction.State `bson:"state"`
-	Version  int64             `bson:"guard_version"`
-	Branches []branchDoc       `bson:"witnesses"`
+	ID             []byte            `bson:"_id"`
+	Request        []byte            `bson:"request_key"`
+	Owner          string            `bson:"owner"`
+	Plan           []byte            `bson:"plan"`
+	Digest         []byte            `bson:"plan_digest"`
+	Fence          int64             `bson:"fence"`
+	Epoch          string            `bson:"writer_epoch"`
+	Token          []byte            `bson:"token"`
+	Lease          time.Time         `bson:"lease_until"`
+	State          transaction.State `bson:"state"`
+	Version        int64             `bson:"guard_version"`
+	Branches       []branchDoc       `bson:"witnesses"`
+	PrepareStarted bool              `bson:"prepare_started"`
 }
 type requestDoc struct {
 	ID      []byte `bson:"_id"`
@@ -255,6 +256,24 @@ func (s *Store) Evidence(ctx context.Context, ref transaction.Reference) (*trans
 		}
 	}
 	return nil, nil
+}
+
+func (s *Store) BeginPrepare(ctx context.Context, e transaction.Execution) error {
+	if !e.Valid() || e.Plan.Input().Owner != s.binding.Owner || e.WriterEpoch != s.binding.WriterEpoch {
+		return transaction.ErrBinding
+	}
+	if err := s.bindingIn(ctx, true); err != nil {
+		return err
+	}
+	ek, digest := key(e), e.Plan.Digest()
+	res, err := s.db.Collection("rm_tx_execution").UpdateOne(ctx, bson.M{"_id": ek[:], "state": transaction.Prepared, "token": e.Token[:], "plan_digest": digest[:], "prepare_started": false, "$expr": bson.M{"$gt": bson.A{"$lease_until", "$$NOW"}}}, bson.M{"$set": bson.M{"prepare_started": true}})
+	if err != nil {
+		return err
+	}
+	if res.ModifiedCount != 1 {
+		return transaction.ErrStaleExecution
+	}
+	return nil
 }
 func (s *Store) Abort(ctx context.Context, e transaction.Execution) (bool, error) {
 	return s.abort(ctx, e, false)
