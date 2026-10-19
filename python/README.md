@@ -1,6 +1,6 @@
 # Python reliable-messaging SDK
 
-独立分发包 fangcun-reliable-messaging，导入 reliable_messaging。它是嵌入式 async SDK，借用原事务/资源，不依赖 Go runtime 或宿主仓库。当前源码为 [pyproject.toml](pyproject.toml)的 **0.2.0a2**；制品来源与候选状态见[发布索引](../docs/releases/README.md)，不能从源码版本推断发布或生产采用。
+独立分发包 fangcun-reliable-messaging，导入 reliable_messaging。它是嵌入式 async SDK，借用原事务/资源，不依赖 Go runtime 或宿主仓库。当前源码为 [pyproject.toml](pyproject.toml)的 **0.4.0a1**；制品来源与候选状态见[发布索引](../docs/releases/README.md)，不能从源码版本推断发布或生产采用。
 
 ## 安装
 
@@ -47,3 +47,5 @@ uv build
 必需集成使用一次性 RM_M7_MYSQL_URL；NSQ 另需 RM_MQ_NSQ_TCP/RM_MQ_NSQ_HTTP，崩溃丢消息场景需 Docker 且只删除自建容器。缺依赖失败而非跳过。完整作业/installed-wheel/报告检查见 [Python CI](../.github/workflows/python.yml)与[测试与故障验证](../docs/03-维护与验证/测试与故障验证.md)。
 
 构建不授权替换既有制品或升级生产。Go/Python 包、wire、schema、宿主部署为独立边界，见[兼容与升级](../docs/03-维护与验证/兼容与升级.md)。历史 M7 过程与 prerelease 快照留在归档/发布证据层。
+
+RocketMQ 的独立事务入口及原 SQLAlchemy 根事务示例见[事务 SDK](../docs/02-接入指南/RocketMQ事务SDK.md)；Python Mongo 不在本批。

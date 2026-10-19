@@ -1,5 +1,7 @@
 # 事务与 Outbox
 
+RocketMQ 独立事务入口、原事务 witness 与 Checker 见[事务 SDK 接入](../02-接入指南/RocketMQ事务SDK.md)。本文原 Outbox 契约继续独立适用。
+
 本篇解释发送意图怎样与业务事实一起提交，以及提交之后如何领取、重投和结算。**业务事务负责“有没有这条意图”；标准租约 Store 负责“当前谁有资格发送与写回”；消费者或业务回执负责“对方是否已经持久接受”。** 三者的状态不能混用。
 
 仓库提供 Go 标准租约 Outbox、Go/Python 回执型 Outbox、Python 原 pending/delivered 表适配。它们服务于不同接入边界，没有一张表同时实现全部合同。本文按当前源码解释，制品与宿主依赖见[版本索引](../releases/README.md)。

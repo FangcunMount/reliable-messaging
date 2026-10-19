@@ -1,5 +1,7 @@
 # Python 接入
 
+RocketMQ 独立事务入口、原事务 witness 与 Checker 见[事务 SDK 接入](RocketMQ事务SDK.md)。本文原 Outbox 契约继续独立适用。
+
 Python 接入有两条合同，不能合成一个与 Go 标准 Store 完全对称的接口：0.1 核心绑定宿主原事务和已有 pending/delivered 表，0.2 增加可选 NSQ、protected wire 与回执型 Outbox。它们都保留宿主事务和单进程运行归属，但没有 Go 标准租约 Store 的跨进程领取与 fencing。
 
 本篇先沿 qs-ai 的真实“状态已持久生成 → QS 接受原通知 → 原通知结算”链路解释 0.2，再给 0.1 原表配方。消息恢复只重投原通知，不重建任务、替换冻结配置或重做结果未知的模型调用。
