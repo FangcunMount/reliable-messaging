@@ -1,5 +1,6 @@
 name: Python messaging SDK
 on:
+  workflow_dispatch:
   push:
     branches: [main, codex/m7-python-sdk, codex/ai-mq-sdk, codex/ai-mq-ack-budget]
     paths: ['python/**', 'contracts/**', 'wire/protected/**', 'wire/legacy/**', 'delivery/mysql/**', 'tests/integration/protectedprobe/**', 'tests/integration/ackbudget/**', 'go.mod', 'go.sum', '.github/workflows/python.yml']
