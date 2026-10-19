@@ -12,6 +12,7 @@ import (
 
 	"github.com/FangcunMount/reliable-messaging/message"
 	"github.com/FangcunMount/reliable-messaging/transaction"
+	"github.com/FangcunMount/reliable-messaging/transport"
 	driver "github.com/FangcunMount/reliable-messaging/transport/rocketmq/internal/driver"
 )
 
@@ -130,7 +131,7 @@ func transactionFixture(t *testing.T, count int) (transaction.Execution, *transa
 		if err != nil {
 			t.Fatal(err)
 		}
-		in.Branches = append(in.Branches, transaction.BranchInput{ID: id, PhysicalTopic: "physical", RouteRevision: "v2", Message: m, Wire: []byte("frozen-" + id)})
+		in.Branches = append(in.Branches, transaction.BranchInput{ID: id, PhysicalTopic: transactionTestTopic(t), RouteRevision: "v2", Message: m, Wire: []byte("frozen-" + id)})
 	}
 	p, err := transaction.NewPlan(in)
 	if err != nil {
@@ -141,7 +142,7 @@ func transactionFixture(t *testing.T, count int) (transaction.Execution, *transa
 }
 func transactionRuntime(t *testing.T, store *transactionMemoryStore, backend *transactionFakeBackend, limits transaction.Limits) *TransactionalSender {
 	t.Helper()
-	s, err := NewTransactionalSender(TransactionConfig{Endpoint: "127.0.0.1:8081", Owner: "test.mysql", AccessKey: "fixture", SecretKey: "fixture", Limits: limits, Routes: []TransactionRoute{{LogicalTopic: "logical", PhysicalTopic: "physical", Revision: "v2"}}}, store)
+	s, err := NewTransactionalSender(TransactionConfig{Endpoint: "127.0.0.1:8081", Owner: "test.mysql", AccessKey: "fixture", SecretKey: "fixture", Limits: limits, Routes: []TransactionRoute{{LogicalTopic: "logical", PhysicalTopic: transactionTestTopic(t), Revision: "v2"}}}, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,13 +317,13 @@ func TestTransactionCheckerValidatesActualTopicWireAndExactEvidence(t *testing.T
 	}
 	body := e.Plan.Input().Branches[0].Wire
 	store.set(transaction.Committed)
-	if got := s.checkMessage(context.Background(), "physical", raw, body); got != driver.COMMIT {
+	if got := s.checkMessage(context.Background(), transactionTestTopic(t), raw, body); got != driver.COMMIT {
 		t.Fatal(got)
 	}
 	for _, tc := range []struct {
 		topic     string
 		raw, body []byte
-	}{{"wrong", raw, body}, {"physical", raw, []byte("different wire")}, {"physical", []byte("{}"), body}} {
+	}{{"wrong", raw, body}, {transactionTestTopic(t), raw, []byte("different wire")}, {transactionTestTopic(t), []byte("{}"), body}} {
 		if got := s.checkMessage(context.Background(), tc.topic, tc.raw, tc.body); got != driver.UNKNOWN {
 			t.Fatal("invalid recovery committed", got)
 		}
@@ -330,7 +331,7 @@ func TestTransactionCheckerValidatesActualTopicWireAndExactEvidence(t *testing.T
 	store.mu.Lock()
 	store.err = errors.New("database unavailable")
 	store.mu.Unlock()
-	if got := s.checkMessage(context.Background(), "physical", raw, body); got != driver.UNKNOWN {
+	if got := s.checkMessage(context.Background(), transactionTestTopic(t), raw, body); got != driver.UNKNOWN {
 		t.Fatal("DB failure guessed rollback")
 	}
 }
@@ -386,4 +387,13 @@ func TestTransactionCheckerPanicDoesNotLoseBoundedWorker(t *testing.T) {
 	if s.Stats().CallbackErrors != 1 {
 		t.Fatal("callback failure not observable")
 	}
+}
+
+func transactionTestTopic(t *testing.T) string {
+	t.Helper()
+	topic, err := transport.PhysicalTopicV2("logical", transport.TransactionMessageType, "test.mysql", "v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return topic
 }

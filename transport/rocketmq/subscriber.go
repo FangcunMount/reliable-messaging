@@ -86,22 +86,20 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, subscription string, 
 	if handler == nil || failed == nil {
 		return errors.New("handler and durable failure callback required")
 	}
-	var route transport.RouteBinding
-	for _, r := range s.config.Routes {
-		if r.Topic == topic && r.Subscription == subscription && r.ConsumerGroup != "" {
-			route = r
-			break
-		}
+	routes, route, err := s.subscriptionRoutes(topic, subscription)
+	if err != nil {
+		return err
 	}
-	if route.ConsumerGroup == "" {
-		return errors.New("subscription not in trusted route manifest")
+	expressions := make(map[string]*driver.FilterExpression, len(routes))
+	for physical := range routes {
+		expressions[physical] = driver.SUB_ALL
 	}
 	if _, ok := s.running[route.ConsumerGroup]; ok {
 		return errors.New("duplicate consumer group")
 	}
 	inner, err := driver.NewSimpleConsumer(&driver.Config{Endpoint: s.config.Endpoint, ConsumerGroup: route.ConsumerGroup, Credentials: &credentials.SessionCredentials{AccessKey: s.config.AccessKey, AccessSecret: s.config.SecretKey}}, driver.WithClientFuncForSimpleConsumer(func(c *driver.Config, opts ...driver.ClientOption) (driver.Client, error) {
 		return driver.NewClient(c, append(opts, driver.WithQueryRouteTimeout(s.config.RequestTimeout), driver.WithConnOptions(driver.WithTLSConfig(s.config.TLS)))...)
-	}), driver.WithSimpleAwaitDuration(5*time.Second), driver.WithSimpleSubscriptionExpressions(map[string]*driver.FilterExpression{route.PhysicalTopic: driver.SUB_ALL}))
+	}), driver.WithSimpleAwaitDuration(5*time.Second), driver.WithSimpleSubscriptionExpressions(expressions))
 	if err != nil {
 		return err
 	}
@@ -119,11 +117,32 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic, subscription string, 
 	health := &atomic.Int64{}
 	s.health[route.ConsumerGroup] = health
 	s.pollers.Add(1)
-	go s.poll(inner, route, handler, failed, health)
+	go s.poll(inner, route, routes, handler, failed, health)
 	return nil
 }
 
-func (s *Subscriber) poll(inner consumer, route transport.RouteBinding, handler transport.Handler, failed func(context.Context, transport.Failure) error, health *atomic.Int64) {
+// All physical inputs use ONE SimpleConsumer and the existing shared slots.
+func (s *Subscriber) subscriptionRoutes(topic, subscription string) (map[string]transport.RouteBinding, transport.RouteBinding, error) {
+	routes := map[string]transport.RouteBinding{}
+	var first transport.RouteBinding
+	for _, r := range s.config.Routes {
+		if r.Topic != topic || r.Subscription != subscription || r.ConsumerGroup == "" {
+			continue
+		}
+		if first.ConsumerGroup == "" {
+			first = r
+		} else if r.ConsumerGroup != first.ConsumerGroup {
+			return nil, first, errors.New("logical subscription mixes incompatible consumer group versions")
+		}
+		routes[r.PhysicalTopic] = r
+	}
+	if len(routes) == 0 {
+		return nil, first, errors.New("subscription not in trusted route manifest")
+	}
+	return routes, first, nil
+}
+
+func (s *Subscriber) poll(inner consumer, route transport.RouteBinding, routes map[string]transport.RouteBinding, handler transport.Handler, failed func(context.Context, transport.Failure) error, health *atomic.Int64) {
 	defer s.pollers.Done()
 	for {
 		// Reserve capacity before receive so invisible messages never accumulate
@@ -177,11 +196,15 @@ func (s *Subscriber) poll(inner consumer, route transport.RouteBinding, handler 
 		}
 		for _, m := range messages {
 			s.handlers.Add(1)
-			go func(m *driver.MessageView) {
+			actual, ok := routes[m.GetTopic()]
+			if !ok {
+				actual = route
+			} // handle rejects an unexpected physical source.
+			go func(m *driver.MessageView, r transport.RouteBinding) {
 				defer s.handlers.Done()
 				defer func() { <-s.slots }()
-				s.handle(inner, route, m, handler, failed)
-			}(m)
+				s.handle(inner, r, m, handler, failed)
+			}(m, actual)
 		}
 	}
 }

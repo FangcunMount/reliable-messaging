@@ -6,16 +6,19 @@ import hashlib
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from reliable_messaging.message import Message
+from reliable_messaging.rocketmq import Config, RocketMQSubscriber
 from reliable_messaging.rocketmq_transaction import (
     TransactionalSender,
     TransactionConfig,
     TransactionRoute,
+    TransactionSendError,
 )
 from reliable_messaging.transaction import (
     Binding,
@@ -26,18 +29,27 @@ from reliable_messaging.transaction import (
     Request,
 )
 from reliable_messaging.transaction_mysql import MySQLTransactionStore
+from reliable_messaging.transport import RouteBinding
+from reliable_messaging.wire import Envelope, decode, encode
+
+_output = threading.Lock()
 
 
 def emit(event, identity="", decision=""):
-    print(
-        "TXPROBE " + json.dumps({"event": event, "id": identity, "decision": decision}), flush=True
-    )
+    with _output:
+        print(
+            "TXPROBE " + json.dumps({"event": event, "id": identity, "decision": decision}),
+            flush=True,
+        )
 
 
 async def run(args):
     config = json.loads(args.config.read_text())
     if not config["endpoint"].startswith("127.0.0.1:") or "@127.0.0.1:" not in config["mysql_url"]:
         raise ValueError("owned loopback fixture required")
+    if args.mode in ("consume", "shared-consume"):
+        await consume(config, args.mode == "shared-consume")
+        return
     engine = create_async_engine(
         config["mysql_url"], pool_size=8, max_overflow=4, connect_args={"connect_timeout": 2}
     )
@@ -51,7 +63,10 @@ async def run(args):
             config["accesskey"],
             config["secretkey"],
             config["owner"],
-            (TransactionRoute("sdk.logical", config["topic"], "sdk-v2"),),
+            tuple(
+                TransactionRoute(r["topic"], r["physical_topic"], r["route_revision"])
+                for r in config["owner_routes"]
+            ),
             Limits(lease=15, reconcile_interval=0.2),
         ),
         store,
@@ -109,7 +124,11 @@ async def run(args):
                 hashlib.sha256(identity.encode()).digest(),
                 (
                     FrozenBranch(
-                        "branch", config["topic"], "sdk-v2", message, ("sdk:" + identity).encode()
+                        "branch",
+                        config["topic"],
+                        config["route_revision"],
+                        message,
+                        fixture_wire(identity),
                     ),
                 ),
             )
@@ -153,19 +172,116 @@ async def run(args):
         await engine.dispose()
 
 
+def fixture_wire(identity):
+    return (
+        b"\n"
+        + encode(
+            Envelope(
+                identity, ("sdk:" + identity).encode(), {"fixture": "m2-sdk", "unicode": "测评 <&>"}
+            )
+        )
+        + b"\n"
+    )
+
+
+async def consume(config, shared):
+    routes = tuple(RouteBinding(**r) for r in config["inputs"])
+    release = asyncio.Event()
+    if not shared:
+        release.set()
+    active, maximum = 0, 0
+
+    async def handler(received):
+        nonlocal active, maximum
+        identity = received.envelope.message_id
+        if (
+            received.wire != fixture_wire(identity)
+            or received.envelope.payload != ("sdk:" + identity).encode()
+            or received.logical_topic != "sdk.logical"
+        ):
+            raise RuntimeError("public SDK original wire or ID mismatch")
+        active += 1
+        maximum = max(maximum, active)
+        if shared:
+            emit("handler_enter", identity, str(active))
+        try:
+            await release.wait()
+        finally:
+            active -= 1
+
+    async def failed(*args):
+        raise RuntimeError("unexpected public SDK durable failure path")
+
+    subscriber = RocketMQSubscriber(
+        Config(
+            config["endpoint"],
+            config["accesskey"],
+            config["secretkey"],
+            routes,
+            timeout=5,
+            max_in_flight=2,
+        ),
+        "sdk.logical",
+        config["subscription"],
+        handler=handler,
+        failed_handler=failed,
+        invalid_handler=failed,
+        invisible_duration=15,
+        handler_timeout=60,
+    )
+    await subscriber.start()
+    # Fixture-only instance observation AFTER the actual upstream Ack succeeds.
+    # The production SDK settlement path is unchanged; no global factory changes.
+    original_ack = subscriber._driver.client.ack
+
+    def acknowledged(raw):
+        result = original_ack(raw)
+        emit("received", decode(raw.body).message_id, "exact_wire_public_sdk_acknowledged")
+        return result
+
+    subscriber._driver.client.ack = acknowledged
+    emit("ready", decision="public_python_sdk_consumer")
+    try:
+        while True:
+            command = (await asyncio.to_thread(sys.stdin.readline)).strip()
+            if command == "release":
+                release.set()
+            if command == "stop" or not command:
+                break
+    finally:
+        await subscriber.stop(grace_seconds=15)
+    emit("max_inflight", decision=str(maximum))
+    emit("closed", decision="consumer_drained")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument(
         "--mode",
-        choices=("send", "recover", "isolation", "crash-committed", "crash-prepared"),
+        choices=(
+            "send",
+            "recover",
+            "consume",
+            "shared-consume",
+            "isolation",
+            "crash-committed",
+            "crash-prepared",
+        ),
         required=True,
     )
     parser.add_argument("--id", default="")
     args = parser.parse_args()
     try:
         asyncio.run(run(args))
-    except Exception:
+    except Exception as error:
+        if getattr(error, "code", None) in (40100, 40300):
+            emit("broker_denied", decision=str(error.code))
+        elif isinstance(error, TransactionSendError) and any(
+            b.error_code in ("half_rejected_40100", "half_rejected_40300")
+            for b in error.result.branches
+        ):
+            emit("broker_denied", decision="half_rejected")
         emit("failed", args.id, "python_sdk_operation_failed")
         raise SystemExit(1) from None
 

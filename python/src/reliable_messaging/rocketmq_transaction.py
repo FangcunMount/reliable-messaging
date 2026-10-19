@@ -38,6 +38,7 @@ from reliable_messaging.transaction import (
     encode_reference,
     resolve,
 )
+from reliable_messaging.transport import physical_topic_v2
 
 REFERENCE_PROPERTY = "rm_tx_ref"
 _T = TypeVar("_T")
@@ -74,6 +75,12 @@ class TransactionConfig:
         if not host or not sep or not port.isdigit() or not 1 <= int(port) <= 65535:
             raise ValueError("explicit host:port endpoint required")
         object.__setattr__(self, "routes", tuple(self.routes))
+        if any(
+            r.physical_topic
+            != physical_topic_v2(r.logical_topic, "TRANSACTION", self.owner, r.revision)
+            for r in self.routes
+        ):
+            raise ValueError("canonical transaction owner routes required")
         if (
             not self.access_key
             or not self.secret_key
@@ -366,7 +373,7 @@ class TransactionalSender:
                 )
                 receipt = HalfReceipt(
                     HalfOutcome.REJECTED if rejected else HalfOutcome.UNKNOWN,
-                    error_code="half_rejected" if rejected else "half_rpc_unknown",
+                    error_code=f"half_rejected_{code}" if rejected else "half_rpc_unknown",
                 )
             branches[i] = replace(
                 branches[i],

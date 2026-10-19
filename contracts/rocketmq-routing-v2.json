@@ -1,0 +1,62 @@
+{
+  "version": 2,
+  "encoding": "UTF-8 fields, each prefixed by unsigned 64-bit big-endian byte length; first 16 SHA256 bytes as lowercase hex",
+  "topic_domain": "rmq-topic-v2\u0000",
+  "group_domain": "rmq-group-v2\u0000",
+  "vectors": [
+    {
+      "topic": "qs.events",
+      "message_type": "NORMAL",
+      "owner": "qs.mysql",
+      "route_revision": "r1",
+      "subscription": "worker",
+      "physical_topic": "rmq2_t_d1a160f362422758c00586c40f7c5b92",
+      "consumer_group": "rmq2_g_714a15af0d2e5e4dc1529f85393f4669"
+    },
+    {
+      "topic": "qs.events",
+      "message_type": "TRANSACTION",
+      "owner": "qs.mysql",
+      "route_revision": "r1",
+      "subscription": "worker",
+      "physical_topic": "rmq2_t_8f77f559b16e6d8748866a5968b66483",
+      "consumer_group": "rmq2_g_714a15af0d2e5e4dc1529f85393f4669"
+    },
+    {
+      "topic": "qs.events",
+      "message_type": "TRANSACTION",
+      "owner": "qs.mongo",
+      "route_revision": "r1",
+      "subscription": "worker",
+      "physical_topic": "rmq2_t_319bcdfe831d32aaf2411f96b3fa2243",
+      "consumer_group": "rmq2_g_714a15af0d2e5e4dc1529f85393f4669"
+    },
+    {
+      "topic": "qs.events",
+      "message_type": "NORMAL",
+      "owner": "qs.mysql",
+      "route_revision": "r2",
+      "subscription": "worker",
+      "physical_topic": "rmq2_t_5544d02ac279bfef4cb84186bb5fc63f",
+      "consumer_group": "rmq2_g_714a15af0d2e5e4dc1529f85393f4669"
+    },
+    {
+      "topic": "测评.已完成",
+      "message_type": "TRANSACTION",
+      "owner": "qs.mongo",
+      "route_revision": "2026-10",
+      "subscription": "报告-worker",
+      "physical_topic": "rmq2_t_b730bab74ddcb85a4bb879b238676b05",
+      "consumer_group": "rmq2_g_73e8a7eb6b8217e8737ae29b54559604"
+    },
+    {
+      "topic": "iam.user.created.v1",
+      "message_type": "TRANSACTION",
+      "owner": "iam.mysql",
+      "route_revision": "m2-alpha1",
+      "subscription": "",
+      "physical_topic": "rmq2_t_6bac62a5896062db75ee85aa307e3d92",
+      "consumer_group": ""
+    }
+  ]
+}

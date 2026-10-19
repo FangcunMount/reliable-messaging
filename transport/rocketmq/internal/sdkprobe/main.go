@@ -1,5 +1,5 @@
-// Disposable acceptance executable. Producers use the PUBLIC SDK exclusively;
-// the private pinned client is used only to observe/ack original wire bytes.
+// Disposable acceptance executable. Producers and consumers use PUBLIC SDK
+// APIs; no production endpoints, schemas or business data are accepted.
 package main
 
 import (
@@ -23,9 +23,9 @@ import (
 	mongostore "github.com/FangcunMount/reliable-messaging/storage/transaction/mongo"
 	mysqlstore "github.com/FangcunMount/reliable-messaging/storage/transaction/mysql"
 	"github.com/FangcunMount/reliable-messaging/transaction"
+	"github.com/FangcunMount/reliable-messaging/transport"
 	"github.com/FangcunMount/reliable-messaging/transport/rocketmq"
 	driver "github.com/FangcunMount/reliable-messaging/transport/rocketmq/internal/driver"
-	"github.com/apache/rocketmq-clients/golang/v5/credentials"
 	_ "github.com/go-sql-driver/mysql"
 	"go.mongodb.org/mongo-driver/bson"
 	mongo "go.mongodb.org/mongo-driver/mongo"
@@ -36,8 +36,11 @@ import (
 )
 
 type config struct {
-	Endpoint, AccessKey, SecretKey, CA, Topic, Group, Owner, DSN, MongoURI, Storage string
-	Branches                                                                        int
+	Revision                                                                                      string                      `json:"route_revision"`
+	OwnerRoutes                                                                                   []rocketmq.TransactionRoute `json:"owner_routes"`
+	Endpoint, AccessKey, SecretKey, CA, Topic, Group, Owner, DSN, MongoURI, Storage, Subscription string
+	Inputs                                                                                        []transport.RouteBinding
+	Branches                                                                                      int
 }
 
 var output sync.Mutex
@@ -50,6 +53,10 @@ func emit(event, id, decision string) {
 }
 func main() {
 	if err := run(); err != nil {
+		var rpcStatus *driver.ErrRpcStatus
+		if errors.As(err, &rpcStatus) && (rpcStatus.Code == 40100 || rpcStatus.Code == 40300) {
+			emit("broker_denied", "", fmt.Sprint(rpcStatus.Code))
+		}
 		emit("failed", "", "sdk_operation_failed")
 		os.Exit(1)
 	}
@@ -71,6 +78,9 @@ func run() error {
 	if splitErr != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() || (c.Storage != "mysql" && c.Storage != "mongo") || (c.Storage == "mysql" && !strings.Contains(c.DSN, "@tcp(127.0.0.1:")) || (c.Storage == "mongo" && !strings.HasPrefix(c.MongoURI, "mongodb://127.0.0.1:")) {
 		return errors.New("owned loopback fixture required")
 	}
+	if c.Revision == "" {
+		c.Revision = "sdk-v2"
+	}
 	ca, err := os.ReadFile(c.CA)
 	if err != nil {
 		return err
@@ -80,8 +90,11 @@ func run() error {
 		return errors.New("CA")
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
-	if *mode == "consume" {
-		return consume(c, tlsConfig)
+	if *mode == "consume" || *mode == "shared-consume" {
+		return consume(c, tlsConfig, *mode == "shared-consume")
+	}
+	if *mode == "normal" {
+		return normal(c, tlsConfig, *id)
 	}
 	ctx := context.Background()
 	binding := transaction.Binding{Owner: c.Owner, StoreID: "sdk-disposable", WriterEpoch: "sdk-epoch-1"}
@@ -220,7 +233,11 @@ func run() error {
 	limits.ReconcileInterval = 200 * time.Millisecond
 	limits.RPCTimeout = 5 * time.Second
 	limits.CheckTimeout = 2 * time.Second
-	sdkConfig := rocketmq.TransactionConfig{Endpoint: c.Endpoint, AccessKey: c.AccessKey, SecretKey: c.SecretKey, TLS: tlsConfig, Owner: c.Owner, Routes: []rocketmq.TransactionRoute{{LogicalTopic: "sdk.logical", PhysicalTopic: c.Topic, Revision: "sdk-v2"}}, Limits: limits}
+	routes := c.OwnerRoutes
+	if len(routes) == 0 {
+		routes = []rocketmq.TransactionRoute{{LogicalTopic: "sdk.logical", PhysicalTopic: c.Topic, Revision: c.Revision}}
+	}
+	sdkConfig := rocketmq.TransactionConfig{Endpoint: c.Endpoint, AccessKey: c.AccessKey, SecretKey: c.SecretKey, TLS: tlsConfig, Owner: c.Owner, Routes: routes, Limits: limits}
 	sender, err := rocketmq.NewTransactionalSender(sdkConfig, store)
 	if err != nil {
 		return err
@@ -314,7 +331,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		branches = append(branches, transaction.BranchInput{ID: fmt.Sprintf("branch-%d", i), PhysicalTopic: c.Topic, RouteRevision: "sdk-v2", Message: m, Wire: []byte("sdk:" + messageID)})
+		branches = append(branches, transaction.BranchInput{ID: fmt.Sprintf("branch-%d", i), PhysicalTopic: c.Topic, RouteRevision: c.Revision, Message: m, Wire: fixtureWire(messageID)})
 	}
 	p, err := transaction.NewPlan(transaction.PlanInput{Owner: c.Owner, Scope: "fixture", OperationID: "op-" + *id, IdempotencyKey: *id, InputHash: sha256.Sum256([]byte(*id)), Branches: branches})
 	if err != nil {
@@ -326,7 +343,7 @@ func run() error {
 	}
 	result, err := sender.Execute(ctx, reservation.Execution, execute)
 	if err != nil {
-		return err
+		return errors.Join(err, closeSender())
 	}
 	if len(result.Branches) != count {
 		return errors.New("half result")
@@ -342,44 +359,4 @@ func run() error {
 	}
 	emit("finalized", *id, string(result.Local))
 	return closeSender()
-}
-func consume(c config, tlsConfig *tls.Config) error {
-	factory := func(cfg *driver.Config, opts ...driver.ClientOption) (driver.Client, error) {
-		return driver.NewClient(cfg, append(opts, driver.WithQueryRouteTimeout(5*time.Second), driver.WithConnOptions(driver.WithTLSConfig(tlsConfig)))...)
-	}
-	consumer, err := driver.NewSimpleConsumer(&driver.Config{Endpoint: c.Endpoint, ConsumerGroup: c.Group, Credentials: &credentials.SessionCredentials{AccessKey: c.AccessKey, AccessSecret: c.SecretKey}}, driver.WithClientFuncForSimpleConsumer(factory), driver.WithSimpleAwaitDuration(time.Second), driver.WithSimpleSubscriptionExpressions(map[string]*driver.FilterExpression{c.Topic: driver.SUB_ALL}))
-	if err != nil {
-		return err
-	}
-	consumer.(interface{ SetRequestTimeout(time.Duration) }).SetRequestTimeout(5 * time.Second)
-	if err = consumer.Start(); err != nil {
-		return err
-	}
-	defer consumer.GracefulStop()
-	emit("ready", "", "observer")
-	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
-		messages, err := consumer.Receive(ctx, 16, 15*time.Second)
-		cancel()
-		if err != nil {
-			var status *driver.ErrRpcStatus
-			if errors.As(err, &status) && status.Code == 40401 {
-				continue
-			}
-			return err
-		}
-		for _, m := range messages {
-			ref, err := transaction.DecodeReference([]byte(m.GetProperties()[rocketmq.TransactionReferenceProperty]))
-			if err != nil || ref.PhysicalTopic != c.Topic || ref.Owner != c.Owner || sha256.Sum256(m.GetBody()) != ref.WireHash || string(m.GetBody()) != "sdk:"+ref.MessageID {
-				return errors.New("original wire mismatch")
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			err = consumer.Ack(ctx, m)
-			cancel()
-			if err != nil {
-				return err
-			}
-			emit("received", ref.MessageID, "exact_wire_acknowledged")
-		}
-	}
 }

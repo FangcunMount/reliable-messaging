@@ -31,6 +31,7 @@ from reliable_messaging.transaction import (
     State,
     encode_reference,
 )
+from reliable_messaging.transport import physical_topic_v2
 
 
 class MemoryStore:
@@ -149,7 +150,7 @@ def fixture(branches=1):
         tuple(
             FrozenBranch(
                 "branch-" + str(i),
-                "physical-" + str(i),
+                physical_topic_v2("logical-" + str(i), "TRANSACTION", "test.mysql", "v2"),
                 "v2",
                 replace(message, message_id="original-" + str(i), destination="logical-" + str(i)),
                 b"wire",

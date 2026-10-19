@@ -118,7 +118,15 @@ class _Driver:
 class RocketMQPublisher:
     def __init__(self, config: Config) -> None:
         self.config = config
-        self.routes = {r.topic: r.physical_topic for r in config.routes}
+        self.routes: dict[str, str] = {}
+        for route in config.routes:
+            if route.message_type not in ("", "NORMAL"):
+                continue
+            if route.topic in self.routes and self.routes[route.topic] != route.physical_topic:
+                raise ValueError("ambiguous normal publisher route owner or revision")
+            self.routes[route.topic] = route.physical_topic
+        if not self.routes:
+            raise ValueError("explicit NORMAL publisher route required")
         self._driver = _Driver(config)
         self._publishing: asyncio.Semaphore | None = None
 
@@ -209,13 +217,18 @@ class RocketMQSubscriber:
         retry_cap: float = 60,
     ) -> None:
         bindings = [r for r in config.routes if r.topic == topic and r.subscription == channel]
-        if len(bindings) != 1 or not bindings[0].consumer_group:
+        if (
+            not bindings
+            or not bindings[0].consumer_group
+            or len({r.consumer_group for r in bindings}) != 1
+        ):
             raise ValueError("subscription not in trusted manifest")
         if not 1 <= max_attempts <= 65535 or not 10 <= invisible_duration <= 43200:
             raise ValueError("bounded attempts and visibility required")
         if handler_timeout <= 0 or not 0 < retry_cap <= 43200:
             raise ValueError("bounded handler/retry durations required")
         self.config, self.route = config, bindings[0]
+        self._physical_routes = {r.physical_topic: r for r in bindings}
         self.handler, self.failed_handler = handler, failed_handler
         self.invalid_handler = invalid_handler
         self.max_attempts, self.invisible_duration = max_attempts, invisible_duration
@@ -247,12 +260,13 @@ class RocketMQSubscriber:
                     request_timeout=math.ceil(self.config.timeout),
                 ),
                 self.route.consumer_group,
-                {self.route.physical_topic: FilterExpression()},
+                {physical: FilterExpression() for physical in self._physical_routes},
                 await_duration=5,
                 tls_enable=True,
             )
             self._driver.client.startup()
-            self._driver.client._retrieve_topic_route_data(self.route.physical_topic)
+            for physical in self._physical_routes:
+                self._driver.client._retrieve_topic_route_data(physical)
             _require_server_settings(self._driver.client, self.config.timeout)
 
         try:
@@ -277,6 +291,9 @@ class RocketMQSubscriber:
                 if not messages:
                     self._slots.release()
                     continue
+                if len(messages) != 1:
+                    self._slots.release()
+                    raise RuntimeError("driver returned more messages than reserved capacity")
                 for message in messages:
                     task = asyncio.create_task(self._handle(message))
                     self._tasks.add(task)
@@ -327,7 +344,8 @@ class RocketMQSubscriber:
         try:
             async with asyncio.timeout(self.handler_timeout):
                 wire = bytes(raw.body)
-                if raw.topic != self.route.physical_topic or raw.corrupted:
+                route = self._physical_routes.get(raw.topic)
+                if route is None or raw.corrupted:
                     raise ValueError("physical source or broker checksum mismatch")
                 try:
                     value = decode(wire)
@@ -346,7 +364,7 @@ class RocketMQSubscriber:
                         int(raw.born_timestamp or 0) * 1_000_000,
                         "rocketmq",
                         raw.topic,
-                        self.route.topic,
+                        route.topic,
                     )
                     if attempts > self.max_attempts:
                         await self._failed(received)
@@ -380,7 +398,7 @@ class RocketMQSubscriber:
             "provider": "rocketmq",
             "topic": self.route.topic,
             "channel": self.route.subscription,
-            "physical_topic": self.route.physical_topic,
+            "physical_topic": received.physical_topic,
             "uuid": received.envelope.message_id,
             "transport_message_id": received.transport_id,
             "metadata": received.envelope.metadata,

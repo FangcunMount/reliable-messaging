@@ -14,6 +14,9 @@ type RouteBinding struct {
 	Subscription  string `json:"subscription,omitempty"`
 	PhysicalTopic string `json:"physical_topic"`
 	ConsumerGroup string `json:"consumer_group,omitempty"`
+	MessageType   string `json:"message_type,omitempty"`
+	Owner         string `json:"owner,omitempty"`
+	RouteRevision string `json:"route_revision,omitempty"`
 }
 
 func PhysicalTopic(topic string) string { return "rmq_t_" + routeDigest(topic) }
@@ -30,31 +33,51 @@ func ValidateRoutes(routes []RouteBinding) error {
 	if len(routes) == 0 {
 		return errors.New("explicit route bindings required")
 	}
-	seen := map[string]bool{}
-	physical := map[string]string{}
+	seen := map[[5]string]bool{}
+	physical := map[string][4]string{}
+	groups := map[string][2]string{}
 	for _, r := range routes {
-		if r.Topic == "" || strings.ContainsRune(r.Topic, 0) || strings.ContainsRune(r.Subscription, 0) || r.PhysicalTopic != PhysicalTopic(r.Topic) {
-			return errors.New("invalid logical/physical topic binding")
+		expected, group := PhysicalTopic(r.Topic), ""
+		if r.Subscription != "" {
+			group = ConsumerGroup(r.Topic, r.Subscription)
 		}
-		key := r.Topic + "\x00" + r.Subscription
+		if r.MessageType != "" {
+			var err error
+			expected, err = PhysicalTopicV2(r.Topic, r.MessageType, r.Owner, r.RouteRevision)
+			if err != nil {
+				return err
+			}
+			if r.Subscription != "" {
+				group, err = ConsumerGroupV2(r.Topic, r.Subscription)
+				if err != nil {
+					return err
+				}
+			}
+		} else if r.Owner != "" || r.RouteRevision != "" {
+			return errors.New("v2 type, owner and revision must be explicit together")
+		}
+		if r.Topic == "" || strings.ContainsRune(r.Topic, 0) || strings.ContainsRune(r.Subscription, 0) || r.PhysicalTopic != expected || r.ConsumerGroup != group {
+			return errors.New("invalid canonical route binding")
+		}
+		key := [5]string{r.Topic, r.Subscription, r.MessageType, r.Owner, r.RouteRevision}
 		if seen[key] {
 			return errors.New("duplicate route binding")
 		}
 		seen[key] = true
-		if old, ok := physical[r.PhysicalTopic]; ok && old != r.Topic {
+		identity := [4]string{r.Topic, r.MessageType, r.Owner, r.RouteRevision}
+		if old, ok := physical[r.PhysicalTopic]; ok && old != identity {
 			return errors.New("physical topic collision")
 		}
-		physical[r.PhysicalTopic] = r.Topic
-		if r.Subscription == "" && r.ConsumerGroup != "" || r.Subscription != "" && r.ConsumerGroup != ConsumerGroup(r.Topic, r.Subscription) {
-			return errors.New("invalid consumer group binding")
-		}
+		physical[r.PhysicalTopic] = identity
 		if r.Subscription != "" {
-			if old, ok := physical[r.ConsumerGroup]; ok && old != key {
+			logical := [2]string{r.Topic, r.Subscription}
+			if old, ok := groups[r.ConsumerGroup]; ok && old != logical {
 				return errors.New("consumer group collision")
 			}
-			physical[r.ConsumerGroup] = key
+			groups[r.ConsumerGroup] = logical
 		}
 	}
+
 	return nil
 }
 

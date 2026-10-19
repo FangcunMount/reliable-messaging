@@ -39,7 +39,16 @@ func NewPublisher(config Config) (*Publisher, error) {
 	}
 	routes := map[string]string{}
 	for _, r := range c.Routes {
+		if r.MessageType != "" && r.MessageType != transport.NormalMessageType {
+			continue
+		}
+		if prior, ok := routes[r.Topic]; ok && prior != r.PhysicalTopic {
+			return nil, errors.New("ambiguous normal publisher route revision or owner")
+		}
 		routes[r.Topic] = r.PhysicalTopic
+	}
+	if len(routes) == 0 {
+		return nil, errors.New("explicit NORMAL publisher route required")
 	}
 	return &Publisher{config: c, routes: routes, slots: make(chan struct{}, c.MaxInFlight), drained: make(chan struct{}), stop: make(chan struct{}), closeDone: make(chan struct{})}, nil
 }
