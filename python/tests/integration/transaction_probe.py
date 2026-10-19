@@ -58,6 +58,12 @@ async def run(args):
     )
     try:
         await sender.start()
+        if args.mode == "isolation":
+            other = TransactionalSender(sender.config, store)
+            await other.start()
+            await sender.close(grace_seconds=15)
+            sender = other
+            emit("isolated", args.id, "first_closed_second_ready")
         emit("ready", args.id, "public_python_sdk")
         if args.mode == "recover":
 
@@ -143,6 +149,7 @@ async def run(args):
         # Never dispose a host pool while SDK resources are still running.
         if not sender.stats()["stopped"]:
             await sender.close(grace_seconds=20)
+            emit("closed", args.id, "failed_start_drained")
         await engine.dispose()
 
 
@@ -150,7 +157,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument(
-        "--mode", choices=("send", "recover", "crash-committed", "crash-prepared"), required=True
+        "--mode",
+        choices=("send", "recover", "isolation", "crash-committed", "crash-prepared"),
+        required=True,
     )
     parser.add_argument("--id", default="")
     args = parser.parse_args()

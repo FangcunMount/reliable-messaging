@@ -108,6 +108,7 @@ class TransactionalSender:
         self._active = 0
         self._available: asyncio.Event | None = None
         self._started = False
+        self._stopped = False
         self._ever_started = False
         self._stopping = False
         self._db_healthy = False
@@ -482,11 +483,14 @@ class TransactionalSender:
             await self._pool.drain()
         if self._calls:
             await asyncio.gather(*tuple(self._calls), return_exceptions=True)
-        if self._client is not None:
-            await self._call(self._client.shutdown)
-        if self._executor is not None:
-            self._executor.shutdown(wait=False)
+        try:
+            if self._client is not None:
+                await self._call(self._client.shutdown)
+        finally:
+            if self._executor is not None:
+                self._executor.shutdown(wait=False)
         self._started = False
+        self._stopped = True
 
     async def close(self, *, grace_seconds: float = 10) -> None:
         if grace_seconds < 0:
@@ -531,7 +535,7 @@ class TransactionalSender:
             "database_errors": self._database_errors,
             "reconciled": self._reconciled,
             "stopping": self._stopping,
-            "stopped": self._close_task is not None and self._close_task.done(),
+            "stopped": self._stopped,
             "ready": self._started
             and not self._stopping
             and self._db_healthy
