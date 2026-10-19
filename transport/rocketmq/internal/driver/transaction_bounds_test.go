@@ -18,7 +18,9 @@ import (
 	"github.com/apache/rocketmq-clients/golang/v5/pkg/utils"
 	v2 "github.com/apache/rocketmq-clients/golang/v5/protocol/v2"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
 type boundedTransactionServer struct {
@@ -208,5 +210,61 @@ func TestTransactionContextAlsoBoundsColdTLSConnection(t *testing.T) {
 	start := time.Now()
 	if err = tx.CommitContext(ctx); err == nil || time.Since(start) > 300*time.Millisecond {
 		t.Fatal("cold dial ignored transaction caller context", err)
+	}
+}
+
+// Server-side retry settings must never authorize another half-message send.
+type oneAttemptTransactionServer struct {
+	boundedTransactionServer
+	sends atomic.Int32
+}
+
+func (s *oneAttemptTransactionServer) SendMessage(context.Context, *v2.SendMessageRequest) (*v2.SendMessageResponse, error) {
+	s.sends.Add(1)
+	return nil, status.Error(codes.Unavailable, "synthetic lost half reply")
+}
+func TestTransactionSendDoesNotRetryAfterServerRetryOverride(t *testing.T) {
+	certificate := httptest.NewTLSServer(http.NotFoundHandler())
+	cert := certificate.TLS.Certificates[0]
+	certificate.Close()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := utils.ParseTarget(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})))
+	service := &oneAttemptTransactionServer{boundedTransactionServer: boundedTransactionServer{endpoint: endpoint}}
+	v2.RegisterMessagingServiceServer(server, service)
+	go server.Serve(listener)
+	t.Cleanup(server.Stop)
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(leaf)
+	inner, err := NewProducer(&Config{Endpoint: listener.Addr().String()}, WithTopics("topic"), WithMaxAttempts(1), WithClientFunc(func(c *Config, opts ...ClientOption) (Client, error) {
+		return NewClient(c, append(opts, WithConnOptions(WithTLSConfig(&tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12})))...)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := inner.(*defaultProducer)
+	manager := p.cli.newClientManager()
+	p.cli.clientManager = manager
+	defer manager.shutdown()
+	p.cli.on.Store(true)
+	if err = p.pSetting.applySettingsCommand(&v2.Settings{BackoffPolicy: &v2.RetryPolicy{MaxAttempts: 5}, PubSub: &v2.Settings_Publishing{Publishing: &v2.Publishing{MaxBodySize: 4 * 1024 * 1024, ValidateMessageType: false}}}); err != nil {
+		t.Fatal(err)
+	}
+	p.pSetting.requestTimeout = time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = p.SendWithTransaction(ctx, &Message{Topic: "topic", Body: []byte("synthetic")}, p.BeginTransaction())
+	if err == nil || service.sends.Load() != 1 {
+		t.Fatalf("actual half RPC attempts=%d error=%v", service.sends.Load(), err)
 	}
 }
