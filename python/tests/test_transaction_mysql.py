@@ -260,3 +260,43 @@ async def test_prepare_admission_is_durable_and_one_shot(fixture):
     assert observed is not None and not observed.execution.owned
     with pytest.raises(BindingError):
         await store.begin_prepare(observed.execution)
+
+
+async def test_broker_receipt_audit_cannot_replace_original_transaction_proof(fixture):
+    from reliable_messaging.transaction import FinalOutcome, HalfOutcome, HalfReceipt
+
+    _, sessions, store = fixture
+    await store.validate()
+    e = await reserve(store, "receipt")
+    ref = e.references[0]
+    await store.record_half(e, ref, HalfReceipt(HalfOutcome.PREPARED, "broker-id", "broker-tx"))
+    with pytest.raises(StaleExecutionError):
+        await store.record_half(e, ref, HalfReceipt(HalfOutcome.PREPARED, "different", "broker-tx"))
+    with pytest.raises(StaleExecutionError):
+        await store.record_half(e, ref, HalfReceipt(HalfOutcome.UNKNOWN))
+    assert await decision(store, e) == Decision.UNKNOWN
+    with pytest.raises(StaleExecutionError):
+        await store.record_final(e, ref, FinalOutcome.COMMIT_CONFIRMED, "")
+    async with sessions() as db, db.begin():
+        guard = await store.bind(db, e)
+        await db.execute(text("INSERT INTO rm_tx_business_proof VALUES('receipt',1)"))
+        await guard.commit_witness()
+    await store.record_final(e, ref, FinalOutcome.UNKNOWN, "rpc_unknown")
+    assert await decision(store, e) == Decision.COMMIT
+    async with sessions() as db:
+        row = (
+            await db.execute(
+                text(
+                    "SELECT w.broker_message_id,w.broker_transaction_id,w.final_outcome "
+                    "FROM rm_tx_witness w JOIN rm_tx_execution e "
+                    "ON w.execution_key=e.execution_key "
+                    "WHERE e.operation_id=:operation"
+                ),
+                {"operation": e.plan.operation_id.encode()},
+            )
+        ).one()
+        assert tuple(row) == (b"broker-id", b"broker-tx", b"unknown")
+
+    await store.record_final(e, ref, FinalOutcome.COMMIT_CONFIRMED, "")
+    with pytest.raises(StaleExecutionError):
+        await store.record_final(e, ref, FinalOutcome.UNKNOWN, "late_timeout")
