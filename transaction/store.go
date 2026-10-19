@@ -86,6 +86,9 @@ type Reservation struct {
 type Store interface {
 	Lookup(context.Context, Request) (Reservation, error)
 	Reserve(context.Context, Request, FrozenPlan, ReserveOptions) (Reservation, error)
+	// BeginPrepare consumes the winner capability once, BEFORE Broker I/O. A
+	// repeated Execute cannot create another half-message set for this fence.
+	BeginPrepare(context.Context, Execution) error
 	Evidence(context.Context, Reference) (*Evidence, error)
 	Abort(context.Context, Execution) (bool, error)
 	ReconcileOnce(context.Context, int) (int, error)

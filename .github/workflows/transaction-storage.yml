@@ -1,0 +1,38 @@
+name: Transaction storage proofs
+on:
+  pull_request:
+    paths: ['transaction/**', 'storage/transaction/**', 'contracts/**', 'scripts/transaction-storage-integration.py', '.github/workflows/transaction-storage.yml', 'go.mod', 'go.sum']
+  push:
+    branches: [main, codex/rocketmq-m2-storage]
+    paths: ['transaction/**', 'storage/transaction/**', 'contracts/**', 'scripts/transaction-storage-integration.py', '.github/workflows/transaction-storage.yml', 'go.mod', 'go.sum']
+permissions:
+  contents: read
+jobs:
+  transactions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - go: '1.25.9'
+            mysql: 'mysql:8.0.36'
+          - go: '1.25.12'
+            mysql: 'mysql:8.0.44'
+          - go: '1.25.12'
+            mysql: 'mysql:8.4'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Required owned MySQL and Mongo original transaction proofs
+        run: python3 scripts/transaction-storage-integration.py --sdk "$PWD" --report artifacts/transaction-storage.json --mysql-image '${{ matrix.mysql }}'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: tx-storage-${{ strategy.job-index }}-${{ github.sha }}
+          path: |
+            artifacts/transaction-storage.json
+            artifacts/transaction-storage.private.log
+          if-no-files-found: error

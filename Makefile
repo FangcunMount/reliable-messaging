@@ -23,3 +23,6 @@ integration:
 	bash scripts/integration.sh
 subscription-integration:
 	bash scripts/nsq-subscription-integration.sh
+.PHONY: transaction-storage-integration
+transaction-storage-integration:
+	python3 scripts/transaction-storage-integration.py --sdk "$(CURDIR)" --report artifacts/transaction-storage.json
