@@ -45,7 +45,8 @@
   "patches": [
     "rpc-options.patch",
     "transaction-runtime.patch",
-    "settings-snapshot.patch"
+    "settings-snapshot.patch",
+    "meter-snapshot.patch"
   ],
   "patched_sha256": {
     "client.go": "5fcf31e8d9b895cb8fce3f36e1a29b008716b77cafb5427c2ab996a72d598a4b",
@@ -68,7 +69,7 @@
     "message.go": "cd6eba5cbde4f68ef17540b7f61523a1b9da559cb4ddcbbbc4ee1351542b65c2",
     "message_id.go": "6797a1e2a89a78016c4048ce8bc97ab8bc60a55010694b982a14ce7eb0f0e5cc",
     "message_id_codec.go": "17f7407b417bd8996885bca27c4e2a00dfc8f3bb6c8e2f121f4395fe4b192404",
-    "metric.go": "40f077d2aff82fee8f9159e765f9f58cc4846d07a40d97e58493e9139db34e2e",
+    "metric.go": "26602085dad817668fc61a8dc068d95235a27acc8e464e3c278c678cb4e85aa5",
     "name_resolver.go": "8aaa51e30fdd0cdbe358076eb749ac67cbbc51107a559d729108218498e9fe37",
     "process_queue.go": "6d51d1a8c44a6c575a2c8ad2155b12e95027872a295cd7df822761604c9ef39f",
     "producer.go": "99f7e6eac95da4b9aaa6208962b8f772deeb575ef524db3631acda2ce6a3bd97",

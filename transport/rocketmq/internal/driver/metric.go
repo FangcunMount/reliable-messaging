@@ -20,6 +20,7 @@ package golang
 import (
 	"context"
 	"sync"
+	stdatomic "sync/atomic"
 	"time"
 
 	"go.uber.org/atomic"
@@ -151,7 +152,7 @@ var _ = ClientMeterProvider(&defaultClientMeterProvider{})
 
 type defaultClientMeterProvider struct {
 	client      Client
-	clientMeter *defaultClientMeter
+	clientMeter stdatomic.Pointer[defaultClientMeter]
 	globalMutex sync.Mutex
 }
 
@@ -318,7 +319,7 @@ func (dmmi *defaultMessageMeterInterceptor) doAfter(messageHookPoints MessageHoo
 	return nil
 }
 func (dcmp *defaultClientMeterProvider) isEnabled() bool {
-	return dcmp.clientMeter.enabled.Load()
+	return dcmp.clientMeter.Load().enabled.Load()
 }
 func (dcmp *defaultClientMeterProvider) getClientID() string {
 	return dcmp.client.GetClientID()
@@ -326,16 +327,17 @@ func (dcmp *defaultClientMeterProvider) getClientID() string {
 func (dcmp *defaultClientMeterProvider) Reset(metric *v2.Metric) {
 	dcmp.globalMutex.Lock()
 	defer dcmp.globalMutex.Unlock()
+	current := dcmp.clientMeter.Load()
 	endpoints := metric.GetEndpoints()
-	if dcmp.clientMeter.enabled.Load() && metric.GetOn() && utils.CompareEndpoints(dcmp.clientMeter.endpoints, endpoints) {
+	if current.enabled.Load() && metric.GetOn() && utils.CompareEndpoints(current.endpoints, endpoints) {
 		sugarBaseLogger.Infof("metric settings is satisfied by the current message meter, clientId=%s", dcmp.client.GetClientID())
 		return
 	}
 
 	if !metric.GetOn() {
-		dcmp.clientMeter.shutdown()
+		current.shutdown()
 		sugarBaseLogger.Infof("metric is off, clientId=%s", dcmp.client.GetClientID())
-		dcmp.clientMeter = NewDefaultClientMeter(nil, false, nil, dcmp.client.GetClientID())
+		dcmp.clientMeter.Store(NewDefaultClientMeter(nil, false, nil, dcmp.client.GetClientID()))
 		return
 	}
 	agentAddr := utils.ParseAddress(utils.SelectAnAddress(endpoints))
@@ -350,17 +352,16 @@ func (dcmp *defaultClientMeterProvider) Reset(metric *v2.Metric) {
 		return
 	}
 	// Reset message meter.
-	dcmp.clientMeter.shutdown()
-	dcmp.clientMeter = NewDefaultClientMeter(exporter, true, endpoints, dcmp.client.GetClientID())
-	dcmp.clientMeter.start()
+	current.shutdown()
+	next := NewDefaultClientMeter(exporter, true, endpoints, dcmp.client.GetClientID())
+	dcmp.clientMeter.Store(next)
+	next.start()
 	sugarBaseLogger.Infof("metrics is on, endpoints=%v, clientId=%s", endpoints, dcmp.client.GetClientID())
 }
 
 var NewDefaultClientMeterProvider = func(client *defaultClient) ClientMeterProvider {
-	cmp := &defaultClientMeterProvider{
-		client:      client,
-		clientMeter: NewDefaultClientMeter(nil, false, nil, "nil"),
-	}
+	cmp := &defaultClientMeterProvider{client: client}
+	cmp.clientMeter.Store(NewDefaultClientMeter(nil, false, nil, "nil"))
 	client.registerMessageInterceptor(NewDefaultMessageMeterInterceptor(cmp))
 	return cmp
 }

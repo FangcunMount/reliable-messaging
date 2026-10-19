@@ -43,3 +43,13 @@ regression proves a captured command survives later settings/returned-value
 mutation, and race plus real TLS telemetry tests exercise concurrent updates
 and repeated startup/settings exchanges. This is a source fix, not a transport
 retry or business replay. Public transaction/wire/schema contracts are unchanged.
+
+`meter-snapshot.patch` fixes the metric-off settings/consumer ACK race found by
+M3's real IAM host matrix. Broker telemetry replaces the provider's meter while
+delivery hooks read it; an atomic flag inside that meter does not protect its
+pointer. The provider now publishes meter pointers atomically, while retaining
+the existing serialized reset/exporter lifecycle. Delivery hooks take a single
+nonblocking snapshot and do not wait behind exporter shutdown or creation.
+A deterministic concurrent reset/hook test reproduces the old race; a real TLS
+SimpleConsumer ACK/telemetry test exercises repeated metric-off commands during
+400 actual ACK RPCs. Public APIs, protocol codecs, schemas and budgets are unchanged.
