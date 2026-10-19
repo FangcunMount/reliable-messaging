@@ -70,6 +70,14 @@ func (s *Store) RecordHalf(ctx context.Context, e transaction.Execution, ref tra
 		if state != transaction.Prepared {
 			return transaction.ErrStaleExecution
 		}
+		var message, brokerTx []byte
+		var previous transaction.HalfOutcome
+		if err := tx.QueryRowContext(ctx, `SELECT broker_message_id,broker_transaction_id,half_outcome FROM rm_tx_witness WHERE execution_key=? AND branch_key=?`, ek, bk).Scan(&message, &brokerTx, &previous); err != nil {
+			return err
+		}
+		if (len(message) > 0 && string(message) != h.BrokerMessageID) || (len(brokerTx) > 0 && string(brokerTx) != h.BrokerTransactionID) || (previous != transaction.HalfNotAttempted && previous != transaction.HalfUnknown && previous != h.Outcome) {
+			return transaction.ErrStaleExecution
+		}
 		_, err := tx.ExecContext(ctx, `UPDATE rm_tx_witness SET half_outcome=?,broker_message_id=?,broker_transaction_id=?,half_error_code=?,half_recorded_at=UTC_TIMESTAMP(6) WHERE execution_key=? AND branch_key=?`, h.Outcome, []byte(h.BrokerMessageID), []byte(h.BrokerTransactionID), []byte(h.ErrorCode), ek, bk)
 		return err
 	})
@@ -83,6 +91,13 @@ func (s *Store) RecordFinal(ctx context.Context, e transaction.Execution, ref tr
 			return transaction.ErrStaleExecution
 		}
 		if f == transaction.FinalCommitConfirmed && state != transaction.Committed || f == transaction.FinalRollbackConfirmed && state != transaction.Aborted {
+			return transaction.ErrStaleExecution
+		}
+		var previous transaction.FinalOutcome
+		if err := tx.QueryRowContext(ctx, `SELECT final_outcome FROM rm_tx_witness WHERE execution_key=? AND branch_key=?`, ek, bk).Scan(&previous); err != nil {
+			return err
+		}
+		if previous != transaction.FinalNotAttempted && previous != transaction.FinalUnknown && previous != f {
 			return transaction.ErrStaleExecution
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE rm_tx_witness SET final_outcome=?,final_error_code=?,final_recorded_at=UTC_TIMESTAMP(6) WHERE execution_key=? AND branch_key=?`, f, []byte(code), ek, bk)

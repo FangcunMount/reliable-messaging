@@ -256,7 +256,9 @@ func TestTransactionCancellationKeepsRealUOWSlotUntilCompletion(t *testing.T) {
 	}
 	short, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer stop()
-	if err := s.Close(short); !errors.Is(err, transaction.ErrShutdownIncomplete) || backend.closes.Load() != 0 {
+	err := s.Close(short)
+	var incomplete *transaction.ShutdownIncomplete
+	if !errors.Is(err, transaction.ErrShutdownIncomplete) || !errors.As(err, &incomplete) || incomplete.ActiveSends != 1 || !incomplete.RuntimePending || backend.closes.Load() != 0 {
 		t.Fatal("shutdown falsely drained live business", err)
 	}
 	releaseOnce.Do(func() { close(release) })

@@ -24,3 +24,15 @@ type Runtime interface {
 	Close(context.Context) error
 	Wait(context.Context) error
 }
+
+// ShutdownIncomplete reports work still owned by this runtime at the deadline.
+// Counts are a snapshot; Wait/Close can continue draining the same resources.
+type ShutdownIncomplete struct {
+	ActiveSends, RunningChecks, QueuedChecks int
+	RuntimePending                           bool
+	Cause                                    error
+}
+
+func (e *ShutdownIncomplete) Error() string        { return "transaction runtime shutdown incomplete" }
+func (e *ShutdownIncomplete) Unwrap() error        { return e.Cause }
+func (e *ShutdownIncomplete) Is(target error) bool { return target == ErrShutdownIncomplete }
