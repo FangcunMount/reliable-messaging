@@ -107,7 +107,9 @@ class MySQLTransactionStore:
                 (
                     await db.execute(
                         text(
-                            "SELECT state,reference FROM rm_tx_witness WHERE execution_key=:key "
+                            "SELECT state,reference,broker_message_id,broker_transaction_id,"
+                            "half_outcome,final_outcome FROM rm_tx_witness "
+                            "WHERE execution_key=:key "
                             "AND branch_key=:branch FOR UPDATE"
                         ),
                         {"key": _key(e), "branch": branch_key(ref.branch_id)},
@@ -121,6 +123,9 @@ class MySQLTransactionStore:
                 raise StaleExecutionError("branch proof differs")
             if final:
                 outcome = values["outcome"]
+                previous = _str(branch["final_outcome"])
+                if previous not in ("not_attempted", "unknown", outcome):
+                    raise StaleExecutionError("positive final receipt cannot be downgraded")
                 if (
                     state not in (State.COMMITTED, State.ABORTED)
                     or (outcome == FinalOutcome.COMMIT_CONFIRMED and state != State.COMMITTED)
@@ -135,6 +140,19 @@ class MySQLTransactionStore:
             else:
                 if state != State.PREPARED:
                     raise StaleExecutionError("half audit requires prepared witness")
+                if (
+                    _str(branch["half_outcome"])
+                    not in ("not_attempted", "unknown", values["outcome"])
+                    or (
+                        branch["broker_message_id"]
+                        and bytes(branch["broker_message_id"]) != values["message"]
+                    )
+                    or (
+                        branch["broker_transaction_id"]
+                        and bytes(branch["broker_transaction_id"]) != values["transaction"]
+                    )
+                ):
+                    raise StaleExecutionError("original Broker receipt cannot be replaced")
                 sql = (
                     "UPDATE rm_tx_witness SET half_outcome=:outcome,broker_message_id=:message,"
                     "broker_transaction_id=:transaction,half_error_code=:code,"

@@ -270,6 +270,10 @@ async def test_broker_receipt_audit_cannot_replace_original_transaction_proof(fi
     e = await reserve(store, "receipt")
     ref = e.references[0]
     await store.record_half(e, ref, HalfReceipt(HalfOutcome.PREPARED, "broker-id", "broker-tx"))
+    with pytest.raises(StaleExecutionError):
+        await store.record_half(e, ref, HalfReceipt(HalfOutcome.PREPARED, "different", "broker-tx"))
+    with pytest.raises(StaleExecutionError):
+        await store.record_half(e, ref, HalfReceipt(HalfOutcome.UNKNOWN))
     assert await decision(store, e) == Decision.UNKNOWN
     with pytest.raises(StaleExecutionError):
         await store.record_final(e, ref, FinalOutcome.COMMIT_CONFIRMED, "")
@@ -292,3 +296,7 @@ async def test_broker_receipt_audit_cannot_replace_original_transaction_proof(fi
             )
         ).one()
         assert tuple(row) == (b"broker-id", b"broker-tx", b"unknown")
+
+    await store.record_final(e, ref, FinalOutcome.COMMIT_CONFIRMED, "")
+    with pytest.raises(StaleExecutionError):
+        await store.record_final(e, ref, FinalOutcome.UNKNOWN, "late_timeout")

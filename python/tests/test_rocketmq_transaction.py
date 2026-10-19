@@ -87,6 +87,8 @@ class Client:
         self.started = self.stopped = self.sent = self.committed = self.aborted = 0
         self.fail_send_at = None
         self.fail_final = False
+        self.send_started = threading.Event()
+        self.send_release = None
         self.final_started = threading.Event()
         self.final_release = None
 
@@ -104,6 +106,9 @@ class Client:
 
     def send(self, message, handle):
         self.sent += 1
+        self.send_started.set()
+        if self.send_release is not None:
+            self.send_release.wait()
         if self.sent == self.fail_send_at:
             raise TimeoutError("synthetic half reply loss")
         return SimpleNamespace(
@@ -237,7 +242,10 @@ async def test_caller_cancellation_and_timed_close_retain_live_business_and_rpc(
 
     async def local(e):
         entered.set()
-        await release.wait()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            await release.wait()  # emulate a database UOW whose cancellation is delayed
         store.state = State.COMMITTED
         return LocalOutcome.COMMITTED
 
@@ -294,7 +302,7 @@ async def test_close_timeout_keeps_real_blocking_final_rpc_capacity():
     operation = asyncio.create_task(sender.execute(execution, local))
     assert await asyncio.to_thread(client.final_started.wait, 2)
     with pytest.raises(ShutdownIncompleteError):
-        await sender.close(grace_seconds=.02)
+        await sender.close(grace_seconds=0.02)
     assert sender.stats()["active_sends"] == 1
     assert client.stopped == 0
     client.final_release.set()
@@ -319,3 +327,27 @@ async def test_failed_start_cleans_owned_resources_and_does_not_stop_other_insta
     assert second.stats()["ready"]
     await second.close()
     assert healthy.stopped == 1
+
+
+async def test_cancellation_during_half_preparation_does_not_start_business():
+    sender, store, client, execution = fixture()
+    await sender.start()
+    client.send_release = threading.Event()
+    calls = 0
+
+    async def local(e):
+        nonlocal calls
+        calls += 1
+        return LocalOutcome.COMMITTED
+
+    operation = asyncio.create_task(sender.execute(execution, local))
+    assert await asyncio.to_thread(client.send_started.wait, 2)
+    operation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await operation
+    with pytest.raises(ShutdownIncompleteError):
+        await sender.close(grace_seconds=0.02)
+    assert calls == 0 and sender.stats()["pending_calls"] == 1
+    client.send_release.set()
+    await sender.wait()
+    assert calls == 0 and store.state == State.ABORTED and client.aborted == 1

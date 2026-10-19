@@ -273,7 +273,14 @@ class TransactionalSender:
         if not execution.owned or execution.writer_epoch != self.store.binding.writer_epoch:
             raise BindingError("exact owned execution required")
         await self._admit()
-        return await asyncio.shield(self._own(self._execute(execution, local_executor)))
+        cancelled = asyncio.Event()
+        try:
+            return await asyncio.shield(
+                self._own(self._execute(execution, local_executor, cancelled))
+            )
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
 
     async def _proof(self, e: Execution) -> LocalOutcome:
         async def read() -> tuple[Evidence | None, ...]:
@@ -285,7 +292,9 @@ class TransactionalSender:
         except Exception:
             return LocalOutcome.UNKNOWN
 
-    async def _execute(self, e: Execution, local: LocalExecutor) -> Result:
+    async def _execute(
+        self, e: Execution, local: LocalExecutor, cancelled: asyncio.Event
+    ) -> Result:
         branches = [
             BranchResult(r, HalfOutcome.NOT_ATTEMPTED, FinalOutcome.NOT_ATTEMPTED)
             for r in e.references
@@ -333,7 +342,19 @@ class TransactionalSender:
             raise TransactionSendError("execution_already_consumed", result()) from None
         except Exception:
             raise TransactionSendError("prepare_admission_failed", result()) from None
+
+        async def abort_unstarted() -> None:
+            try:
+                aborted = await self._database(self.store.abort(e))
+                if aborted or await self._proof(e) == LocalOutcome.ABORTED:
+                    await finalize(Decision.ROLLBACK)
+            except Exception:
+                pass
+
         for i, branch in enumerate(e.plan.branches):
+            if cancelled.is_set():
+                await abort_unstarted()
+                raise TransactionSendError("caller_cancelled_before_local", result())
             try:
                 receipt, handles[i] = await self._call(self._prepare, branches[i].reference, branch)
             except Exception:
@@ -352,21 +373,34 @@ class TransactionalSender:
                 failed = True
                 branches[i] = replace(branches[i], error_code="half_audit_failed")
             if failed:
-                try:
-                    aborted = await self._database(self.store.abort(e))
-                    if aborted or await self._proof(e) == LocalOutcome.ABORTED:
-                        await finalize(Decision.ROLLBACK)
-                except Exception:
-                    pass
+                await abort_unstarted()
                 raise TransactionSendError("all_halves_not_confirmed", result())
-        # The executor runs once, on the host loop; callback success is not proof.
+        if cancelled.is_set():
+            await abort_unstarted()
+            raise TransactionSendError("caller_cancelled_before_local", result())
+        # Invoke once. Cooperative cancellation/lease expiration asks the host
+        # UOW to stop, then STILL awaits its actual completion before proof/RPC.
         reported = LocalOutcome.UNKNOWN
+
+        async def run_local() -> LocalOutcome:
+            return await local(e)
+
+        local_task = asyncio.create_task(run_local())
+        cancel_wait = asyncio.create_task(cancelled.wait())
         try:
             remaining = max(0, (e.lease_until - datetime.now(UTC)).total_seconds())
-            async with asyncio.timeout(remaining):
-                reported = await local(e)
-        except (Exception, asyncio.CancelledError):
-            pass
+            await asyncio.wait(
+                (local_task, cancel_wait), timeout=remaining, return_when=asyncio.FIRST_COMPLETED
+            )
+            if not local_task.done():
+                local_task.cancel()
+            try:
+                reported = await local_task
+            except (Exception, asyncio.CancelledError):
+                pass
+        finally:
+            cancel_wait.cancel()
+            await asyncio.gather(cancel_wait, return_exceptions=True)
         local_result = await self._proof(e)
         if local_result == LocalOutcome.UNKNOWN and reported == LocalOutcome.ABORTED:
             try:
@@ -463,10 +497,13 @@ class TransactionalSender:
         self.stop_admission()
         self._ensure_close()
         assert self._close_task is not None
+        budget = asyncio.timeout(grace_seconds)
         try:
-            async with asyncio.timeout(grace_seconds):
+            async with budget:
                 await asyncio.shield(self._close_task)
         except TimeoutError:
+            if not budget.expired():
+                raise
             error = ShutdownIncompleteError("transaction resources still running", self.stats())
             raise error from None
 
@@ -480,6 +517,8 @@ class TransactionalSender:
         pool = self._pool.snapshot() if self._pool is not None else {}
         pending = pool.get("pending", 0)
         return {
+            "pending_calls": len(self._calls),
+            "starting": self._start_task is not None and not self._start_task.done(),
             "active_sends": self._active,
             "pending_checks": pending,
             "running_checks": pool.get("running", 0),
