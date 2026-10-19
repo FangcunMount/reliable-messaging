@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/FangcunMount/reliable-messaging/transport"
-	driver "github.com/apache/rocketmq-clients/golang/v5"
+	driver "github.com/FangcunMount/reliable-messaging/transport/rocketmq/internal/driver"
 )
 
 type fakeProducer struct {

@@ -1,0 +1,60 @@
+--- a/client.go
++++ b/client.go
+@@ -537,9 +537,15 @@
+ 	return nil
+ }
+ 
++func (cli *defaultClient) newClientManager() *defaultClientManager {
++	rpcOptions := append([]RpcClientOption(nil), cli.opts.rpcClientOptions...)
++	rpcOptions = append(rpcOptions, WithRpcClientConnOption(cli.opts.connOptions...), WithRpcClientClientConnFunc(cli.opts.clientConnFunc))
++	return NewDefaultClientManager(rpcOptions...)
++}
++
+ func (cli *defaultClient) startUp() error {
+ 	cli.log.Infof("begin to start the rocketmq client")
+-	cm := NewDefaultClientManager()
++	cm := cli.newClientManager()
+ 	cm.startUp()
+ 	cm.RegisterClient(cli)
+ 	cli.clientManager = cm
+--- a/client_manager.go
++++ b/client_manager.go
+@@ -86,15 +86,17 @@
+ 	clientTable        sync.Map
+ 	done               chan struct{}
+ 	opts               clientManagerOptions
++	rpcOptions         []RpcClientOption
+ }
+ 
+ var _ = ClientManager(&defaultClientManager{})
+ 
+-var NewDefaultClientManager = func() *defaultClientManager {
++var NewDefaultClientManager = func(opts ...RpcClientOption) *defaultClientManager {
+ 	return &defaultClientManager{
+ 		rpcClientTable: make(map[string]RpcClient),
+ 		done:           make(chan struct{}),
+ 		opts:           defaultClientManagerOptions,
++		rpcOptions:     append([]RpcClientOption(nil), opts...),
+ 	}
+ }
+ 
+@@ -212,7 +214,7 @@
+ 			return ret, nil
+ 		}
+ 	}
+-	rpcClient, err := NewRpcClient(target)
++	rpcClient, err := NewRpcClient(target, cm.rpcOptions...)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+--- a/conn_options.go
++++ b/conn_options.go
+@@ -68,7 +68,7 @@
+ 		RootCAs:            x509.NewCertPool(),
+ 		InsecureSkipVerify: true,
+ 	},
+-	Logger:            zaplog.New(),
++	Logger: zaplog.New(),
+ }
+ 
+ // A ConnOption sets options such as tls.Config, etc.

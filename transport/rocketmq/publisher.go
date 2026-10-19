@@ -8,7 +8,7 @@ import (
 
 	"github.com/FangcunMount/reliable-messaging/message"
 	"github.com/FangcunMount/reliable-messaging/transport"
-	driver "github.com/apache/rocketmq-clients/golang/v5"
+	driver "github.com/FangcunMount/reliable-messaging/transport/rocketmq/internal/driver"
 	"github.com/apache/rocketmq-clients/golang/v5/credentials"
 )
 
