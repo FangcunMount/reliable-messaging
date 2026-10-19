@@ -38,6 +38,7 @@ from reliable_messaging.transaction import (
     encode_reference,
     resolve,
 )
+from reliable_messaging.transport import physical_topic_v2
 
 REFERENCE_PROPERTY = "rm_tx_ref"
 _T = TypeVar("_T")
@@ -74,6 +75,12 @@ class TransactionConfig:
         if not host or not sep or not port.isdigit() or not 1 <= int(port) <= 65535:
             raise ValueError("explicit host:port endpoint required")
         object.__setattr__(self, "routes", tuple(self.routes))
+        if any(
+            r.physical_topic
+            != physical_topic_v2(r.logical_topic, "TRANSACTION", self.owner, r.revision)
+            for r in self.routes
+        ):
+            raise ValueError("canonical transaction owner routes required")
         if (
             not self.access_key
             or not self.secret_key
@@ -118,6 +125,21 @@ class TransactionalSender:
         self._maintenance_stop: asyncio.Event | None = None
         self._check_commit = self._check_rollback = self._check_unknown = 0
         self._invalid_checks = self._database_errors = self._reconciled = 0
+        self._result_counts = {
+            key: 0
+            for key in (
+                "completed_results",
+                "half_prepared_results",
+                "half_rejected_results",
+                "half_unknown_results",
+                "local_committed_results",
+                "local_aborted_results",
+                "local_unknown_results",
+                "final_commit_results",
+                "final_rollback_results",
+                "final_unknown_results",
+            )
+        }
         self._local_errors = 0
 
     def _assert_loop(self) -> None:
@@ -253,7 +275,14 @@ class TransactionalSender:
             assert self._available is not None
             self._available.set()
             if not done.cancelled():
-                done.exception()
+                error = done.exception()
+                result = (
+                    error.result
+                    if isinstance(error, TransactionSendError)
+                    else (done.result() if error is None else None)
+                )
+                if isinstance(result, Result):
+                    self._record_result(result)
 
         task.add_done_callback(complete)
         return task
@@ -360,13 +389,12 @@ class TransactionalSender:
             try:
                 receipt, handles[i] = await self._call(self._prepare, branches[i].reference, branch)
             except Exception as error:
-                code = getattr(error, "code", None)
-                rejected = isinstance(code, int) and (
-                    40000 <= code < 40600 or 41300 <= code < 41400
-                )
+                from ._rocketmq_transaction_driver import rejection_code
+
+                code = rejection_code(error)
                 receipt = HalfReceipt(
-                    HalfOutcome.REJECTED if rejected else HalfOutcome.UNKNOWN,
-                    error_code="half_rejected" if rejected else "half_rpc_unknown",
+                    HalfOutcome.REJECTED if code else HalfOutcome.UNKNOWN,
+                    error_code=code or "half_rpc_unknown",
                 )
             branches[i] = replace(
                 branches[i],
@@ -529,10 +557,27 @@ class TransactionalSender:
             raise RuntimeError("Close has not started")
         await asyncio.shield(self._close_task)
 
+    def _record_result(self, result: Result) -> None:
+        # Host-loop only. Observations are not distinct business/consumer effects.
+        self._result_counts["completed_results"] += 1
+        if result.local in (LocalOutcome.COMMITTED, LocalOutcome.ABORTED, LocalOutcome.UNKNOWN):
+            self._result_counts[f"local_{result.local}_results"] += 1
+        for branch in result.branches:
+            if branch.half != HalfOutcome.NOT_ATTEMPTED:
+                self._result_counts[f"half_{branch.half}_results"] += 1
+            key = {
+                FinalOutcome.COMMIT_CONFIRMED: "final_commit_results",
+                FinalOutcome.ROLLBACK_CONFIRMED: "final_rollback_results",
+                FinalOutcome.UNKNOWN: "final_unknown_results",
+            }.get(branch.final)
+            if key is not None:
+                self._result_counts[key] += 1
+
     def stats(self) -> dict[str, int | bool]:
         pool = self._pool.snapshot() if self._pool is not None else {}
         pending = pool.get("pending", 0)
         return {
+            **self._result_counts,
             "pending_calls": len(self._calls),
             "starting": self._start_task is not None and not self._start_task.done(),
             "active_sends": self._active,

@@ -186,6 +186,61 @@ def create_producer(
         return invoke
 
     rpc_budget = timeout
-    for name in ("send_message_async", "end_transaction_async"):
+    for name in ("send_message_async", "end_transaction_async", "query_topic_route_async"):
         setattr(producer.rpc_client, name, bounded(getattr(producer.rpc_client, name)))
+    preserve_route_errors(producer)
     return producer
+
+
+def rejection_code(error: Exception) -> str | None:
+    """Only positive protocol refusals; transport failures remain Unknown."""
+    code = getattr(error, "code", None)
+    if isinstance(code, int) and (40000 <= code < 40600 or 41300 <= code < 41400):
+        return f"half_rejected_{code}"
+    import grpc  # type: ignore[import-untyped]
+
+    if isinstance(error, grpc.RpcError):
+        status = error.code()
+        if status == grpc.StatusCode.PERMISSION_DENIED:
+            return "half_rejected_grpc_permission_denied"
+        if status == grpc.StatusCode.UNAUTHENTICATED:
+            return "half_rejected_grpc_unauthenticated"
+    return None
+
+
+def preserve_route_errors(producer: Any) -> None:
+    """Adapt this 5.1.2 manager only; keep callbacks on its existing I/O loop.
+
+    Upstream update_topic_route waits for an event but swallows the RPC/status
+    error in its callback. Preserve it through that same event/callback boundary
+    so startup can distinguish authorization from unavailable transport.
+    """
+    manager = producer._Client__route_manager
+
+    def update(topic: str) -> Any:
+        completed = threading.Event()
+        failures: list[Exception] = []
+
+        def received(future: Future[Any]) -> None:
+            try:
+                manager._ClientRouteManager__handle_topic_route_res(future.result(), topic)
+            except Exception as error:
+                failures.append(error)
+            finally:
+                completed.set()
+
+        future = producer.rpc_client.query_topic_route_async(
+            producer.client_configuration.rpc_endpoints,
+            manager._ClientRouteManager__topic_route_req(topic),
+            metadata=producer.sign(),
+            timeout=producer.client_configuration.request_timeout,
+        )
+        future.add_done_callback(received)
+        # Capacity remains owned until the real RPC callback finishes, including
+        # cancellation cleanup. The actual upstream RPC has its own deadline.
+        completed.wait()
+        if failures:
+            raise failures[0]
+        return manager._ClientRouteManager__topic_route_cache.get(topic)
+
+    manager.update_topic_route = update

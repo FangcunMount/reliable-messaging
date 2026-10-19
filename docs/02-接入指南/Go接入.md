@@ -1,5 +1,7 @@
 # Go 接入
 
+RocketMQ 独立事务入口、原事务 witness 与 Checker 见[事务 SDK 接入](RocketMQ事务SDK.md)。本文原 Outbox 契约继续独立适用。
+
 Go 接入首先要把一条业务写入和它的发布意图放进同一个原事务；然后装配独立扫描、真实 NSQ 发布与持久消费。SDK 不替宿主建业务数据库、迁移表、开始／提交业务事务，也不提供通用业务 Inbox。
 
 本篇从一个 `example.accepted` 事件给出连续路径：准备原 wire → 业务与 Outbox 提交 → Relay 发布 → 消费保存一次业务效果 → 停机排空。示例是单个显式 nsqd、合成数据和标准 Outbox；回执型业务不能直接套用它的 published 结束点。

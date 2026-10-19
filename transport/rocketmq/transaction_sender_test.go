@@ -12,7 +12,10 @@ import (
 
 	"github.com/FangcunMount/reliable-messaging/message"
 	"github.com/FangcunMount/reliable-messaging/transaction"
+	"github.com/FangcunMount/reliable-messaging/transport"
 	driver "github.com/FangcunMount/reliable-messaging/transport/rocketmq/internal/driver"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 // These fakes prove orchestration only. Real adapters/Broker are separate gates.
@@ -130,7 +133,7 @@ func transactionFixture(t *testing.T, count int) (transaction.Execution, *transa
 		if err != nil {
 			t.Fatal(err)
 		}
-		in.Branches = append(in.Branches, transaction.BranchInput{ID: id, PhysicalTopic: "physical", RouteRevision: "v2", Message: m, Wire: []byte("frozen-" + id)})
+		in.Branches = append(in.Branches, transaction.BranchInput{ID: id, PhysicalTopic: transactionTestTopic(t), RouteRevision: "v2", Message: m, Wire: []byte("frozen-" + id)})
 	}
 	p, err := transaction.NewPlan(in)
 	if err != nil {
@@ -141,7 +144,7 @@ func transactionFixture(t *testing.T, count int) (transaction.Execution, *transa
 }
 func transactionRuntime(t *testing.T, store *transactionMemoryStore, backend *transactionFakeBackend, limits transaction.Limits) *TransactionalSender {
 	t.Helper()
-	s, err := NewTransactionalSender(TransactionConfig{Endpoint: "127.0.0.1:8081", Owner: "test.mysql", AccessKey: "fixture", SecretKey: "fixture", Limits: limits, Routes: []TransactionRoute{{LogicalTopic: "logical", PhysicalTopic: "physical", Revision: "v2"}}}, store)
+	s, err := NewTransactionalSender(TransactionConfig{Endpoint: "127.0.0.1:8081", Owner: "test.mysql", AccessKey: "fixture", SecretKey: "fixture", Limits: limits, Routes: []TransactionRoute{{LogicalTopic: "logical", PhysicalTopic: transactionTestTopic(t), Revision: "v2"}}}, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,6 +183,10 @@ func TestTransactionSenderSeparatesLocalCommitFromLostFinalAck(t *testing.T) {
 		if b.Half != transaction.HalfPrepared || b.Final != transaction.FinalUnknown || b.BrokerMessageID == b.Reference.MessageID {
 			t.Fatal("phase/Broker/business identities conflated")
 		}
+	}
+	stats := s.Stats()
+	if stats.CompletedResults != 1 || stats.LocalCommittedResults != 1 || stats.FinalUnknownResults != 2 || stats.HalfPreparedResults != 2 {
+		t.Fatal("lost final reply hidden from phase counters", stats)
 	}
 	if _, err = s.Execute(context.Background(), e, func(context.Context, transaction.Execution) (transaction.LocalOutcome, error) {
 		calls++
@@ -316,13 +323,13 @@ func TestTransactionCheckerValidatesActualTopicWireAndExactEvidence(t *testing.T
 	}
 	body := e.Plan.Input().Branches[0].Wire
 	store.set(transaction.Committed)
-	if got := s.checkMessage(context.Background(), "physical", raw, body); got != driver.COMMIT {
+	if got := s.checkMessage(context.Background(), transactionTestTopic(t), raw, body); got != driver.COMMIT {
 		t.Fatal(got)
 	}
 	for _, tc := range []struct {
 		topic     string
 		raw, body []byte
-	}{{"wrong", raw, body}, {"physical", raw, []byte("different wire")}, {"physical", []byte("{}"), body}} {
+	}{{"wrong", raw, body}, {transactionTestTopic(t), raw, []byte("different wire")}, {transactionTestTopic(t), []byte("{}"), body}} {
 		if got := s.checkMessage(context.Background(), tc.topic, tc.raw, tc.body); got != driver.UNKNOWN {
 			t.Fatal("invalid recovery committed", got)
 		}
@@ -330,7 +337,7 @@ func TestTransactionCheckerValidatesActualTopicWireAndExactEvidence(t *testing.T
 	store.mu.Lock()
 	store.err = errors.New("database unavailable")
 	store.mu.Unlock()
-	if got := s.checkMessage(context.Background(), "physical", raw, body); got != driver.UNKNOWN {
+	if got := s.checkMessage(context.Background(), transactionTestTopic(t), raw, body); got != driver.UNKNOWN {
 		t.Fatal("DB failure guessed rollback")
 	}
 }
@@ -385,5 +392,33 @@ func TestTransactionCheckerPanicDoesNotLoseBoundedWorker(t *testing.T) {
 	}
 	if s.Stats().CallbackErrors != 1 {
 		t.Fatal("callback failure not observable")
+	}
+}
+
+func transactionTestTopic(t *testing.T) string {
+	t.Helper()
+	topic, err := transport.PhysicalTopicV2("logical", transport.TransactionMessageType, "test.mysql", "v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return topic
+}
+
+func TestHalfRejectionRequiresStructuredProtocolRefusal(t *testing.T) {
+	tests := []struct {
+		err  error
+		want string
+	}{
+		{&driver.ErrRpcStatus{Code: 40300}, "half_rejected_40300"},
+		{fmt.Errorf("startup: %w", grpcstatus.Error(codes.PermissionDenied, "synthetic refusal")), "half_rejected_grpc_permission_denied"},
+		{grpcstatus.Error(codes.Unauthenticated, "synthetic refusal"), "half_rejected_grpc_unauthenticated"},
+		{grpcstatus.Error(codes.Unavailable, "synthetic connection loss"), ""},
+		{context.DeadlineExceeded, ""},
+		{errors.New("PermissionDenied text is not proof"), ""},
+	}
+	for _, test := range tests {
+		if got := rejectedHalfCode(test.err); got != test.want {
+			t.Fatalf("structured rejection %q, want %q", got, test.want)
+		}
 	}
 }

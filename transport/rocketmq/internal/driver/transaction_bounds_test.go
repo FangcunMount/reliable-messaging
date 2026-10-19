@@ -268,3 +268,72 @@ func TestTransactionSendDoesNotRetryAfterServerRetryOverride(t *testing.T) {
 		t.Fatalf("actual half RPC attempts=%d error=%v", service.sends.Load(), err)
 	}
 }
+
+func TestWaitingForAbsentObserverIsInterruptibleOnShutdown(t *testing.T) {
+	cli := &defaultClient{done: make(chan struct{})}
+	session := &defaultClientSession{cli: cli}
+	returned := make(chan struct{})
+	go func() { session._acquire_observer(); close(returned) }()
+	// Closing before or during the wait must interrupt it; neither schedule is
+	// allowed to retain the historical uninterruptible one-second sleep.
+	close(cli.done)
+	select {
+	case <-returned:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("absent observer prevented actual session drain")
+	}
+}
+
+type deniedStartupRouteServer struct {
+	v2.UnimplementedMessagingServiceServer
+	transport bool
+}
+
+func (s *deniedStartupRouteServer) QueryRoute(context.Context, *v2.QueryRouteRequest) (*v2.QueryRouteResponse, error) {
+	if s.transport {
+		return nil, status.Error(codes.PermissionDenied, "synthetic refusal")
+	}
+	return &v2.QueryRouteResponse{Status: &v2.Status{Code: v2.Code_FORBIDDEN, Message: "synthetic refusal"}}, nil
+}
+
+func TestStartupPreservesActualTLSProtocolAndTransportRefusals(t *testing.T) {
+	certificate := httptest.NewTLSServer(http.NotFoundHandler())
+	cert := certificate.TLS.Certificates[0]
+	certificate.Close()
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(leaf)
+	for _, transport := range []bool{false, true} {
+		listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+		if listenErr != nil {
+			t.Fatal(listenErr)
+		}
+		server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})))
+		v2.RegisterMessagingServiceServer(server, &deniedStartupRouteServer{transport: transport})
+		go server.Serve(listener)
+		producer, newErr := NewProducer(&Config{Endpoint: listener.Addr().String()}, WithTopics("fixture"), WithClientFunc(func(c *Config, opts ...ClientOption) (Client, error) {
+			return NewClient(c, append(opts, WithConnOptions(WithTLSConfig(&tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12})))...)
+		}))
+		if newErr != nil {
+			server.Stop()
+			t.Fatal(newErr)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		err = producer.(ContextProducer).StartContext(ctx)
+		cancel()
+		server.Stop()
+		if transport {
+			if status.Code(err) != codes.PermissionDenied {
+				t.Fatal("actual gRPC refusal lost its structured code", err)
+			}
+		} else {
+			var refusal *ErrRpcStatus
+			if !errors.As(err, &refusal) || refusal.Code != int32(v2.Code_FORBIDDEN) {
+				t.Fatal("actual RocketMQ refusal lost its structured code", err)
+			}
+		}
+	}
+}

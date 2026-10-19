@@ -1,6 +1,7 @@
 import asyncio
 import threading
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -191,3 +192,33 @@ async def test_receive_failure_reaches_host_supervision_with_cause() -> None:
         await subscriber.wait()
     assert isinstance(failure.value.__cause__, ConnectionError)
     await subscriber._driver.close(1)
+
+
+async def test_receiver_cannot_create_more_handlers_than_reserved_slots() -> None:
+    called = 0
+
+    async def handler(*args: Any) -> None:
+        nonlocal called
+        called += 1
+
+    subscriber = RocketMQSubscriber(
+        configuration(),
+        "qs.ai.events.v1",
+        "qs-server.ai-events.v1",
+        handler=handler,
+        failed_handler=handler,
+        invalid_handler=handler,
+    )
+    subscriber._slots = asyncio.Semaphore(1)
+    subscriber._failure = asyncio.get_running_loop().create_future()
+    subscriber._driver.client = SimpleNamespace(receive=lambda *args: None)
+
+    async def too_many(*args: Any) -> list[Any]:
+        return [SimpleNamespace(), SimpleNamespace()]
+
+    subscriber._driver.call = too_many  # type: ignore[method-assign]
+    async with asyncio.timeout(0.2):
+        await subscriber._poll()
+    assert isinstance(subscriber._failure_error, RuntimeError)
+    assert called == 0 and not subscriber._tasks
+    assert not subscriber._slots.locked()

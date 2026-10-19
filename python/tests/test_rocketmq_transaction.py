@@ -31,6 +31,7 @@ from reliable_messaging.transaction import (
     State,
     encode_reference,
 )
+from reliable_messaging.transport import physical_topic_v2
 
 
 class MemoryStore:
@@ -149,7 +150,7 @@ def fixture(branches=1):
         tuple(
             FrozenBranch(
                 "branch-" + str(i),
-                "physical-" + str(i),
+                physical_topic_v2("logical-" + str(i), "TRANSACTION", "test.mysql", "v2"),
                 "v2",
                 replace(message, message_id="original-" + str(i), destination="logical-" + str(i)),
                 b"wire",
@@ -193,6 +194,9 @@ async def test_inert_constructor_and_positive_fresh_proof_after_commit_reply_los
         await sender.execute(execution, local)
     assert error.value.result.local == LocalOutcome.COMMITTED
     assert error.value.result.branches[0].final == FinalOutcome.UNKNOWN
+    assert sender.stats()["completed_results"] == 1
+    assert sender.stats()["local_committed_results"] == 1
+    assert sender.stats()["final_unknown_results"] == 1
     with pytest.raises(TransactionSendError):
         await sender.execute(execution, local)
     assert calls == client.sent == 1

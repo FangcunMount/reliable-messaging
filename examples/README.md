@@ -16,3 +16,5 @@ go run ./examples/host-lifecycle
 ```
 
 `make check` 构建/检查这两个包；真实数据库执行由已有[隔离作业](../.github/workflows/integration.yml)和[脚本](../scripts/integration.sh)承担。不要把编译成功解释成原事务已在数据库验证。
+
+[rocketmq-transaction/host.go](rocketmq-transaction/host.go) 提供可编译的原 SQL/GORM/Mongo 事务接线，需宿主显式提供 schema、已启动 Sender 和已冻结计划；不执行 DDL 或启动网络。

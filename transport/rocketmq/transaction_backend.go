@@ -4,19 +4,27 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"time"
 
 	"github.com/FangcunMount/reliable-messaging/transaction"
+	"github.com/FangcunMount/reliable-messaging/transport"
 	driver "github.com/FangcunMount/reliable-messaging/transport/rocketmq/internal/driver"
 	"github.com/apache/rocketmq-clients/golang/v5/credentials"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 const TransactionReferenceProperty = "rm_tx_ref"
 
 // TransactionRoute comes only from the reviewed manifest, never a request body.
-type TransactionRoute struct{ LogicalTopic, PhysicalTopic, Revision string }
+type TransactionRoute struct {
+	LogicalTopic  string `json:"topic"`
+	PhysicalTopic string `json:"physical_topic"`
+	Revision      string `json:"route_revision"`
+}
 type TransactionConfig struct {
 	TLS                                   *tls.Config
 	Endpoint, AccessKey, SecretKey, Owner string
@@ -59,6 +67,10 @@ func validateTransactionConfig(c TransactionConfig, store transaction.PreparedSt
 	physical := map[string]bool{}
 	logical := map[[2]string]bool{}
 	for _, r := range c.Routes {
+		expected, err := transport.PhysicalTopicV2(r.LogicalTopic, transport.TransactionMessageType, c.Owner, r.Revision)
+		if err != nil || r.PhysicalTopic != expected {
+			return c, transaction.ErrBinding
+		}
 		if r.LogicalTopic == "" || r.PhysicalTopic == "" || r.Revision == "" || physical[r.PhysicalTopic] || logical[[2]string{r.LogicalTopic, r.Revision}] {
 			return c, transaction.ErrBinding
 		}
@@ -121,10 +133,8 @@ func (b *driverTransactionBackend) Prepare(ctx context.Context, ref transaction.
 	tx := b.inner.BeginTransaction().(driver.ContextTransaction)
 	receipts, err := b.inner.SendWithTransaction(ctx, msg, tx)
 	h := transaction.HalfReceipt{Outcome: transaction.HalfUnknown, ErrorCode: "half_unknown"}
-	var status *driver.ErrRpcStatus
-	if errors.As(err, &status) && (status.Code >= 40000 && status.Code < 40600 || status.Code >= 41300 && status.Code < 41400) {
-		h.Outcome = transaction.HalfRejected
-		h.ErrorCode = "half_rejected"
+	if code := rejectedHalfCode(err); code != "" {
+		h.Outcome, h.ErrorCode = transaction.HalfRejected, code
 	}
 	if err == nil && len(receipts) == 1 && receipts[0] != nil && receipts[0].MessageID != "" && receipts[0].TransactionId != "" {
 		h = transaction.HalfReceipt{Outcome: transaction.HalfPrepared, BrokerMessageID: receipts[0].MessageID, BrokerTransactionID: receipts[0].TransactionId}
@@ -134,4 +144,19 @@ func (b *driverTransactionBackend) Prepare(ctx context.Context, ref transaction.
 		err = errors.New("transaction half receipt missing identity")
 	}
 	return h, nil, err
+}
+
+func rejectedHalfCode(err error) string {
+	var status *driver.ErrRpcStatus
+	if errors.As(err, &status) && (status.Code >= 40000 && status.Code < 40600 || status.Code >= 41300 && status.Code < 41400) {
+		return fmt.Sprintf("half_rejected_%d", status.Code)
+	}
+	switch grpcstatus.Code(err) {
+	case codes.PermissionDenied:
+		return "half_rejected_grpc_permission_denied"
+	case codes.Unauthenticated:
+		return "half_rejected_grpc_unauthenticated"
+	default:
+		return ""
+	}
 }

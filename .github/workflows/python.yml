@@ -1,5 +1,6 @@
 name: Python messaging SDK
 on:
+  workflow_dispatch:
   push:
     branches: [main, codex/m7-python-sdk, codex/ai-mq-sdk, codex/ai-mq-ack-budget]
     paths: ['python/**', 'contracts/**', 'wire/protected/**', 'wire/legacy/**', 'delivery/mysql/**', 'tests/integration/protectedprobe/**', 'tests/integration/ackbudget/**', 'go.mod', 'go.sum', '.github/workflows/python.yml']
@@ -97,7 +98,10 @@ jobs:
           if not required <= {c.get('name') for c in cases}:
               raise SystemExit('Required final ACK budget acceptance is absent')
           PY
-      - run: uv build
+      - name: Build deterministic fixed candidate assets
+        run: |
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          uv build
       - name: Verify installed wheel independently of the source tree
         run: |
           uv venv .wheel-smoke
@@ -108,7 +112,7 @@ jobs:
           from importlib.metadata import version
           from pathlib import Path
           import reliable_messaging
-          assert version('fangcun-reliable-messaging') == '0.3.0a1'
+          assert version('fangcun-reliable-messaging') == '0.4.0a1'
           assert (Path(reliable_messaging.__file__).parent / 'py.typed').is_file()
           from reliable_messaging.nsq import NSQPublisher
           from reliable_messaging.protected import Context

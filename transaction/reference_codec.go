@@ -28,7 +28,11 @@ func EncodeReference(r Reference) ([]byte, error) {
 	if !r.Valid() {
 		return nil, ErrInvalidPlan
 	}
-	return json.Marshal(storedReference{r.Owner, r.Scope, r.OperationID, r.BranchID, r.MessageID, r.LogicalTopic, r.PhysicalTopic, r.RouteRevision, r.WriterEpoch, hex.EncodeToString(r.PlanDigest[:]), hex.EncodeToString(r.WireHash[:]), hex.EncodeToString(r.MessageFingerprint[:]), r.Fence})
+	data, err := json.Marshal(storedReference{r.Owner, r.Scope, r.OperationID, r.BranchID, r.MessageID, r.LogicalTopic, r.PhysicalTopic, r.RouteRevision, r.WriterEpoch, hex.EncodeToString(r.PlanDigest[:]), hex.EncodeToString(r.WireHash[:]), hex.EncodeToString(r.MessageFingerprint[:]), r.Fence})
+	if err != nil || len(data) > 8192 {
+		return nil, ErrInvalidPlan
+	}
+	return data, nil
 }
 func DecodeReference(data []byte) (Reference, error) {
 	if len(data) == 0 || len(data) > 8192 {

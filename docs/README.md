@@ -1,5 +1,7 @@
 # reliable-messaging 文档导航
 
+RocketMQ 独立事务入口、原事务 witness 与 Checker 见[事务 SDK 接入](02-接入指南/RocketMQ事务SDK.md)。本文原 Outbox 契约继续独立适用。
+
 这里解释 SDK 当前设计、接入前提和维护方法。源码、机器契约、验证结果、发布制品与宿主采用记录各有用途；正文不能代替后四者。适用版本见[发布索引](releases/README.md)，修改规则见[文档维护约定](CONTRIBUTING-DOCS.md)。
 
 ## 按问题阅读

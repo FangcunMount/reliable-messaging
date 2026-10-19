@@ -82,7 +82,10 @@ func (cs *defaultClientSession) _acquire_observer() (v2.MessagingService_Telemet
 	cs.observerLock.RUnlock()
 
 	if observer == nil {
-		time.Sleep(time.Second)
+		select {
+		case <-cs.cli.done:
+		case <-time.After(time.Second):
+		}
 		return nil, false
 	} else {
 		return observer, true
@@ -565,7 +568,7 @@ func (cli *defaultClient) startUpContext(ctx context.Context) error {
 	for _, topic := range cli.initTopics {
 		_, err := cli.getMessageQueues(ctx, topic)
 		if err != nil {
-			return fmt.Errorf("failed to get topic route data result from remote during client startup, clientId=%s, topics=%v, err=%v", cli.clientID, cli.initTopics, err)
+			return fmt.Errorf("failed to get topic route data result from remote during client startup, clientId=%s, topics=%v, err=%w", cli.clientID, cli.initTopics, err)
 		}
 	}
 	f := func() {

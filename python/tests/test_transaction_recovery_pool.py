@@ -98,3 +98,60 @@ async def test_real_pinned_producer_dispatches_to_host_loop_without_global_facto
     assert no_retry.exception() is failure
     producer._Client__is_running = False
     await asyncio.to_thread(producer.shutdown)
+
+
+def test_route_refusal_keeps_original_error_on_only_one_pinned_manager():
+    from concurrent.futures import Future
+    from types import SimpleNamespace
+
+    from rocketmq.v5.client import ClientConfiguration, Credentials
+    from rocketmq.v5.client.client_route_manager import ClientRouteManager
+    from rocketmq.v5.exception.client_exception import ForbiddenException
+
+    from reliable_messaging._rocketmq_transaction_driver import preserve_route_errors
+
+    refusal = ForbiddenException("synthetic refusal", 40300)
+
+    def query(*args, **kwargs):
+        future = Future()
+        future.set_exception(refusal)
+        return future
+
+    def instance():
+        producer = SimpleNamespace(
+            client_configuration=ClientConfiguration(
+                "127.0.0.1:1", Credentials("fixture", "fixture"), request_timeout=1
+            ),
+            rpc_client=SimpleNamespace(query_topic_route_async=query),
+            sign=lambda: [],
+        )
+        producer._Client__route_manager = ClientRouteManager(producer)
+        return producer
+
+    first, second = instance(), instance()
+    original = ClientRouteManager.update_topic_route
+    preserve_route_errors(first)
+    with pytest.raises(ForbiddenException) as error:
+        first._Client__route_manager.update_topic_route("logical")
+    assert error.value is refusal
+    # Actual upstream still swallows it on the untouched peer. No network,
+    # global method replacement, event loop or extra executor is involved.
+    assert second._Client__route_manager.update_topic_route("logical") is None
+    assert ClientRouteManager.update_topic_route is original
+
+
+def test_half_rejection_requires_structured_status_not_exception_text():
+    import grpc
+    from rocketmq.v5.exception.client_exception import ForbiddenException
+
+    from reliable_messaging._rocketmq_transaction_driver import rejection_code
+
+    assert rejection_code(ForbiddenException("synthetic refusal", 40300)) == "half_rejected_40300"
+    for code, expected in (
+        (grpc.StatusCode.PERMISSION_DENIED, "half_rejected_grpc_permission_denied"),
+        (grpc.StatusCode.UNAUTHENTICATED, "half_rejected_grpc_unauthenticated"),
+        (grpc.StatusCode.UNAVAILABLE, None),
+    ):
+        assert rejection_code(grpc.aio.AioRpcError(code, (), (), "synthetic")) == expected
+    assert rejection_code(TimeoutError()) is None
+    assert rejection_code(RuntimeError("PERMISSION_DENIED text is not proof")) is None

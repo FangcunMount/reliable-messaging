@@ -1,6 +1,6 @@
-// Package transaction defines provisional transaction-message contracts.
-// It performs no I/O and does not own a host database transaction. These APIs
-// are not frozen until the RocketMQ M2 original MySQL/Mongo proofs pass.
+// Package transaction defines versioned transaction-message contracts.
+// It performs no I/O and does not own a host database transaction. Fixed
+// prerelease and real dependency evidence are recorded separately from host adoption.
 package transaction
 
 import (
