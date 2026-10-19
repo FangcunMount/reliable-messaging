@@ -1,0 +1,285 @@
+--- a/client.go
++++ b/client.go
+@@ -31 +30,0 @@
+-	"github.com/apache/rocketmq-clients/golang/v5/pkg/ticker"
+@@ -104,0 +104 @@
++	cs.cli.sessionWG.Add(1)
+@@ -105,0 +106 @@
++		defer cs.cli.sessionWG.Done()
+@@ -123,2 +124,5 @@
+-					cs.cli.startUpError = fmt.Errorf("failed to sync settings during startUp: %w", err)
+-					cs.cli.log.Error(cs.cli.startUpError)
++					startupErr := fmt.Errorf("failed to sync settings during startUp: %w", err)
++					cs.cli.startUpErrorLock.Lock()
++					cs.cli.startUpError = startupErr
++					cs.cli.startUpErrorLock.Unlock()
++					cs.cli.log.Error(startupErr)
+@@ -131 +135,5 @@
+-					time.Sleep(cs.recoveryWaitTime)
++					select {
++					case <-cs.cli.done:
++						return
++					case <-time.After(cs.recoveryWaitTime):
++					}
+@@ -240,0 +249,2 @@
++	startUpErrorLock              sync.Mutex
++	sessionWG                     sync.WaitGroup
+@@ -546 +556,3 @@
+-func (cli *defaultClient) startUp() error {
++func (cli *defaultClient) startUp() error { return cli.startUpContext(context.Background()) }
++
++func (cli *defaultClient) startUpContext(ctx context.Context) error {
+@@ -554 +566 @@
+-		_, err := cli.getMessageQueues(context.Background(), topic)
++		_, err := cli.getMessageQueues(ctx, topic)
+@@ -602,3 +614,7 @@
+-	ticker.Tick(f, time.Second*30, cli.done)
+-
+-	// wait syncSettings finish
++	cm.startLoop(time.Second*30, time.Second*30, f)
++
++	// Initial settings must not outlive startup or its configured budget.
++	initialDeadline := time.NewTimer(cli.opts.timeout)
++	defer initialDeadline.Stop()
++	poll := time.NewTicker(10 * time.Millisecond)
++	defer poll.Stop()
+@@ -606,5 +622,15 @@
+-		if cli.startUpError != nil {
+-			return cli.startUpError
+-		}
+-		sugarBaseLogger.Infoln("wait for sync settings finish")
+-		time.Sleep(time.Second)
++		select {
++		case <-ctx.Done():
++			return ctx.Err()
++		case <-cli.done:
++			return fmt.Errorf("client closed during startup")
++		case <-initialDeadline.C:
++			return fmt.Errorf("initial settings deadline exceeded")
++		case <-poll.C:
++		}
++		cli.startUpErrorLock.Lock()
++		startupErr := cli.startUpError
++		cli.startUpErrorLock.Unlock()
++		if startupErr != nil {
++			return startupErr
++		}
+@@ -628,2 +654,2 @@
+-func (cli *defaultClient) notifyClientTermination() {
+-	ctx := cli.Sign(context.Background())
++func (cli *defaultClient) notifyClientTermination(ctx context.Context) {
++	ctx = cli.Sign(ctx)
+@@ -650 +676,3 @@
+-func (cli *defaultClient) GracefulStop() error {
++func (cli *defaultClient) GracefulStop() error { return cli.gracefulStopContext(context.Background()) }
++
++func (cli *defaultClient) gracefulStopContext(ctx context.Context) error {
+@@ -654 +682 @@
+-	cli.notifyClientTermination()
++	cli.notifyClientTermination(ctx)
+@@ -661,0 +690 @@
++	cli.sessionWG.Wait()
+--- a/client_manager.go
++++ b/client_manager.go
+@@ -26 +25,0 @@
+-	"github.com/apache/rocketmq-clients/golang/v5/pkg/ticker"
+@@ -87,0 +87,2 @@
++	loopWG             sync.WaitGroup
++	stopOnce           sync.Once
+@@ -113,0 +115,9 @@
++	cm.startLoop(cm.opts.RPC_CLIENT_IDLE_CHECK_INITIAL_DELAY, cm.opts.RPC_CLIENT_IDLE_CHECK_PERIOD, cm.clearIdleRpcClients)
++	cm.startLoop(cm.opts.HEART_BEAT_INITIAL_DELAY, cm.opts.HEART_BEAT_PERIOD, cm.doHeartbeat)
++	cm.startLoop(cm.opts.LOG_STATS_INITIAL_DELAY, cm.opts.LOG_STATS_PERIOD, cm.doStats)
++	cm.startLoop(cm.opts.SYNC_SETTINGS_DELAY, cm.opts.SYNC_SETTINGS_PERIOD, cm.syncSettings)
++
++	sugarBaseLogger.Info("the client manager starts successfully")
++}
++func (cm *defaultClientManager) startLoop(initial, period time.Duration, fn func()) {
++	cm.loopWG.Add(1)
+@@ -115,3 +125,12 @@
+-		time.Sleep(cm.opts.RPC_CLIENT_IDLE_CHECK_INITIAL_DELAY)
+-		cm.clearIdleRpcClients()
+-		ticker.Tick(cm.clearIdleRpcClients, (cm.opts.RPC_CLIENT_IDLE_CHECK_PERIOD), cm.done)
++		defer cm.loopWG.Done()
++		timer := time.NewTimer(initial)
++		defer timer.Stop()
++		for {
++			select {
++			case <-cm.done:
++				return
++			case <-timer.C:
++				fn()
++				timer.Reset(period)
++			}
++		}
+@@ -119,20 +137,0 @@
+-
+-	go func() {
+-		time.Sleep(cm.opts.HEART_BEAT_INITIAL_DELAY)
+-		cm.doHeartbeat()
+-		ticker.Tick(cm.doHeartbeat, (cm.opts.HEART_BEAT_PERIOD), cm.done)
+-	}()
+-
+-	go func() {
+-		time.Sleep(cm.opts.LOG_STATS_INITIAL_DELAY)
+-		cm.doStats()
+-		ticker.Tick(cm.doStats, (cm.opts.LOG_STATS_PERIOD), cm.done)
+-	}()
+-
+-	go func() {
+-		time.Sleep(cm.opts.SYNC_SETTINGS_DELAY)
+-		cm.syncSettings()
+-		ticker.Tick(cm.syncSettings, (cm.opts.SYNC_SETTINGS_PERIOD), cm.done)
+-	}()
+-
+-	sugarBaseLogger.Info("the client manager starts successfully")
+@@ -177 +176,3 @@
+-	close(cm.done)
++	cm.stopOnce.Do(func() { close(cm.done) })
++	cm.cleanRpcClient()
++	cm.loopWG.Wait()
+@@ -189 +190,6 @@
+-func (cm *defaultClientManager) getRpcClient(endpoints *v2.Endpoints) (RpcClient, error) {
++func (cm *defaultClientManager) getRpcClient(endpoints *v2.Endpoints, contexts ...context.Context) (RpcClient, error) {
++	select {
++	case <-cm.done:
++		return nil, fmt.Errorf("client manager closed")
++	default:
++	}
+@@ -208,0 +215,5 @@
++	select {
++	case <-cm.done:
++		return nil, fmt.Errorf("client manager closed")
++	default:
++	}
+@@ -216 +227,7 @@
+-	rpcClient, err := NewRpcClient(target, cm.rpcOptions...)
++	dialCtx := context.Background()
++	if len(contexts) > 0 && contexts[0] != nil {
++		dialCtx = contexts[0]
++	}
++	rpcOptions := append([]RpcClientOption(nil), cm.rpcOptions...)
++	rpcOptions = append(rpcOptions, WithRpcClientConnOption(WithContext(dialCtx)))
++	rpcClient, err := NewRpcClient(target, rpcOptions...)
+@@ -238 +255 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -250 +267 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -262 +279 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -292 +309 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -309 +326 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -321 +338 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -334 +351 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -344 +361 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -356 +373 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -368 +385 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -380 +397 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -392 +409 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+@@ -404 +421 @@
+-	rpcClient, err := cm.getRpcClient(endpoints)
++	rpcClient, err := cm.getRpcClient(endpoints, ctx)
+--- a/producer.go
++++ b/producer.go
+@@ -44,0 +45,5 @@
++type ContextProducer interface {
++	Producer
++	StartContext(context.Context) error
++}
++
+@@ -55,2 +60,4 @@
+-func (p *defaultProducer) Start() error {
+-	err := p.cli.startUp()
++func (p *defaultProducer) Start() error { return p.StartContext(context.Background()) }
++
++func (p *defaultProducer) StartContext(ctx context.Context) error {
++	err := p.cli.startUpContext(ctx)
+@@ -60 +67 @@
+-	err2 := p.GracefulStop()
++	err2 := p.cli.gracefulStopContext(ctx)
+@@ -436 +443 @@
+-	messageId string, transactionId string, resolution TransactionResolution) error {
++	messageId string, transactionId string, resolution TransactionResolution, source ...v2.TransactionSource) error {
+@@ -445,0 +453,4 @@
++		Source:        v2.TransactionSource_SOURCE_CLIENT,
++	}
++	if len(source) > 0 {
++		request.Source = source[0]
+@@ -479,0 +491,3 @@
++	if command == nil || command.GetMessage() == nil || command.GetMessage().GetSystemProperties() == nil || command.GetMessage().GetTopic() == nil || command.GetMessage().GetSystemProperties().GetBodyDigest() == nil {
++		return fmt.Errorf("invalid transaction recovery command")
++	}
+@@ -486,4 +500,11 @@
+-	go func(mv *MessageView) {
+-		resolution := p.po.checker.Check(mv)
+-		err := p.endTransaction(context.TODO(), endpoints,
+-			mv.GetMessageCommon(), messageId, transactionId, resolution)
++	work := func() {
++		ctx, cancel := context.WithTimeout(context.Background(), p.pSetting.requestTimeout)
++		defer cancel()
++		resolution := UNKNOWN
++		if p.checker.CheckContext != nil {
++			resolution = p.checker.CheckContext(ctx, messageView)
++		} else if p.checker.Check != nil {
++			resolution = p.checker.Check(messageView)
++		}
++		err := p.endTransaction(ctx, endpoints,
++			messageView.GetMessageCommon(), messageId, transactionId, resolution, v2.TransactionSource_SOURCE_SERVER_CHECK)
+@@ -493 +514,6 @@
+-	}(messageView)
++	}
++	if p.checker.Dispatch != nil {
++		p.checker.Dispatch(work)
++		return nil
++	}
++	go work()
+--- a/transaction.go
++++ b/transaction.go
+@@ -39 +39,11 @@
+-	Check func(msg *MessageView) TransactionResolution
++	Check        func(msg *MessageView) TransactionResolution
++	CheckContext func(context.Context, *MessageView) TransactionResolution
++	// Dispatch must admit BEFORE spawning work. False leaves the Broker's
++	// decision unknown; the adapter owns counters, queue bounds and worker join.
++	Dispatch func(func()) bool
++}
++
++type ContextTransaction interface {
++	Transaction
++	CommitContext(context.Context) error
++	RollBackContext(context.Context) error
+@@ -63,0 +74,3 @@
++	return t.CommitContext(context.Background())
++}
++func (t *transactionImpl) CommitContext(ctx context.Context) error {
+@@ -70 +83 @@
+-		err := t.producerImpl.(*defaultProducer).endTransaction(context.TODO(), sendReceipt.Endpoints,
++		err := t.producerImpl.(*defaultProducer).endTransaction(ctx, sendReceipt.Endpoints,
+@@ -85,0 +99,3 @@
++	return t.RollBackContext(context.Background())
++}
++func (t *transactionImpl) RollBackContext(ctx context.Context) error {
+@@ -92 +108 @@
+-		err := t.producerImpl.(*defaultProducer).endTransaction(context.TODO(), sendReceipt.Endpoints,
++		err := t.producerImpl.(*defaultProducer).endTransaction(ctx, sendReceipt.Endpoints,
