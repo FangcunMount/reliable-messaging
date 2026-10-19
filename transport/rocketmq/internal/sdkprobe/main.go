@@ -101,7 +101,9 @@ func run() error {
 	var store transaction.PreparedStore
 	var execute transaction.LocalExecutor
 	command := bufio.NewScanner(os.Stdin)
+	localCalls := 0
 	gate := func() string {
+		localCalls++
 		emit("half", *id, "all_prepared")
 		if !command.Scan() {
 			return "cancel"
@@ -342,6 +344,39 @@ func run() error {
 		return errors.New("fixture reservation failed")
 	}
 	result, err := sender.Execute(ctx, reservation.Execution, execute)
+	if strings.HasPrefix(*mode, "fault-") {
+		emitResult(*id, result, localCalls)
+		valid := false
+		switch *mode {
+		case "fault-half":
+			unknown := false
+			for _, branch := range result.Branches {
+				unknown = unknown || branch.Half == transaction.HalfUnknown
+			}
+			valid = result.Local == transaction.LocalNotStarted && localCalls == 0 && unknown
+		case "fault-final":
+			unknown := false
+			for _, branch := range result.Branches {
+				unknown = unknown || branch.Final == transaction.FinalUnknown
+			}
+			valid = result.Local == transaction.LocalCommitted && localCalls == 1 && unknown
+		case "fault-local-committed":
+			valid = result.Local == transaction.LocalCommitted && localCalls == 1
+		case "fault-local-unknown":
+			valid = result.Local == transaction.LocalUnknown && localCalls == 1
+			for _, branch := range result.Branches {
+				valid = valid && branch.Final == transaction.FinalNotAttempted
+			}
+		}
+		if !valid {
+			return errors.Join(errors.New("expected real fault outcome not established"), closeSender())
+		}
+		if closeErr := closeSender(); closeErr != nil {
+			return closeErr
+		}
+		emit("fault_observed", *id, *mode)
+		return nil
+	}
 	if err != nil {
 		return errors.Join(err, closeSender())
 	}
@@ -359,4 +394,13 @@ func run() error {
 	}
 	emit("finalized", *id, string(result.Local))
 	return closeSender()
+}
+
+func emitResult(id string, result transaction.Result, calls int) {
+	branches := make([]map[string]string, 0, len(result.Branches))
+	for _, b := range result.Branches {
+		branches = append(branches, map[string]string{"message_id": b.Reference.MessageID, "half": string(b.Half), "final": string(b.Final), "error_code": b.ErrorCode, "broker_message_id": b.BrokerMessageID, "broker_transaction_id": b.BrokerTransactionID})
+	}
+	raw, _ := json.Marshal(map[string]any{"local": result.Local, "local_calls": calls, "branches": branches})
+	emit("result", id, string(raw))
 }

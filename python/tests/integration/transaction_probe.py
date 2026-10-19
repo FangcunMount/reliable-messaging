@@ -22,8 +22,10 @@ from reliable_messaging.rocketmq_transaction import (
 )
 from reliable_messaging.transaction import (
     Binding,
+    FinalOutcome,
     FrozenBranch,
     FrozenPlan,
+    HalfOutcome,
     Limits,
     LocalOutcome,
     Request,
@@ -105,39 +107,50 @@ async def run(args):
                 await asyncio.gather(monitor_task, return_exceptions=True)
         else:
             identity = args.id
-            message = Message(
-                "sdkprobe",
-                identity,
-                "sdk.logical",
-                "created",
-                "1",
-                "fixture",
-                "application/octet-stream",
-                "2026-10-19T00:00:00.000000123Z",
-                ("sdk:" + identity).encode(),
-            )
+            count = config.get("branches", 1)
+            if not 1 <= count <= 16:
+                raise ValueError("bounded fixture branches required")
+            branches = []
+            for index in range(count):
+                message_id = identity if count == 1 else f"{identity}-b{index}"
+                message = Message(
+                    "sdkprobe",
+                    message_id,
+                    "sdk.logical",
+                    "created",
+                    "1",
+                    "fixture",
+                    "application/octet-stream",
+                    "2026-10-19T00:00:00.000000123Z",
+                    ("sdk:" + message_id).encode(),
+                )
+                branches.append(
+                    FrozenBranch(
+                        f"branch-{index}",
+                        config["topic"],
+                        config["route_revision"],
+                        message,
+                        fixture_wire(message_id),
+                    )
+                )
             plan = FrozenPlan(
                 config["owner"],
                 "fixture",
                 "op-" + identity,
                 identity,
                 hashlib.sha256(identity.encode()).digest(),
-                (
-                    FrozenBranch(
-                        "branch",
-                        config["topic"],
-                        config["route_revision"],
-                        message,
-                        fixture_wire(identity),
-                    ),
-                ),
+                tuple(branches),
             )
             request = Request(plan.owner, plan.scope, plan.idempotency_key, plan.input_hash)
             reservation = await sender.reserve(request, plan)
             if not reservation.acquired:
                 raise RuntimeError("fixture request not new")
 
+            local_calls = 0
+
             async def local(e):
+                nonlocal local_calls
+                local_calls += 1
                 emit("half", identity, "all_prepared")
                 action = (await asyncio.to_thread(sys.stdin.readline)).strip()
                 if args.mode == "crash-prepared":
@@ -160,8 +173,52 @@ async def run(args):
                     os._exit(23)
                 return LocalOutcome.COMMITTED
 
-            result = await sender.execute(reservation.execution, local)
-            emit("finalized", identity, result.local)
+            try:
+                result = await sender.execute(reservation.execution, local)
+            except TransactionSendError as error:
+                if not args.mode.startswith("fault-"):
+                    raise
+                result = error.result
+            if args.mode.startswith("fault-"):
+                valid = {
+                    "fault-half": result.local == LocalOutcome.NOT_STARTED
+                    and local_calls == 0
+                    and any(b.half == HalfOutcome.UNKNOWN for b in result.branches),
+                    "fault-final": result.local == LocalOutcome.COMMITTED
+                    and local_calls == 1
+                    and any(b.final == FinalOutcome.UNKNOWN for b in result.branches),
+                    "fault-local-committed": result.local == LocalOutcome.COMMITTED
+                    and local_calls == 1,
+                    "fault-local-unknown": result.local == LocalOutcome.UNKNOWN
+                    and local_calls == 1
+                    and all(b.final == FinalOutcome.NOT_ATTEMPTED for b in result.branches),
+                }.get(args.mode, False)
+                emit(
+                    "result",
+                    identity,
+                    json.dumps(
+                        {
+                            "local": result.local,
+                            "local_calls": local_calls,
+                            "branches": [
+                                {
+                                    "message_id": b.reference.message_id,
+                                    "half": b.half,
+                                    "final": b.final,
+                                    "error_code": b.error_code,
+                                    "broker_message_id": b.broker_message_id,
+                                    "broker_transaction_id": b.broker_transaction_id,
+                                }
+                                for b in result.branches
+                            ],
+                        }
+                    ),
+                )
+                if not valid:
+                    raise RuntimeError("expected real fault outcome not established")
+                emit("fault_observed", identity, args.mode)
+            else:
+                emit("finalized", identity, result.local)
         await sender.close(grace_seconds=15)
         emit("closed", args.id, "drained")
     finally:
@@ -267,6 +324,10 @@ def main():
             "isolation",
             "crash-committed",
             "crash-prepared",
+            "fault-half",
+            "fault-final",
+            "fault-local-committed",
+            "fault-local-unknown",
         ),
         required=True,
     )
