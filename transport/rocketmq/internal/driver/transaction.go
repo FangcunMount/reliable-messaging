@@ -36,7 +36,17 @@ const (
 )
 
 type TransactionChecker struct {
-	Check func(msg *MessageView) TransactionResolution
+	Check        func(msg *MessageView) TransactionResolution
+	CheckContext func(context.Context, *MessageView) TransactionResolution
+	// Dispatch must admit BEFORE spawning work. False leaves the Broker's
+	// decision unknown; the adapter owns counters, queue bounds and worker join.
+	Dispatch func(func()) bool
+}
+
+type ContextTransaction interface {
+	Transaction
+	CommitContext(context.Context) error
+	RollBackContext(context.Context) error
 }
 
 type Transaction interface {
@@ -61,13 +71,16 @@ var NewTransactionImpl = func(producerImpl Producer) *transactionImpl {
 }
 
 func (t *transactionImpl) Commit() error {
+	return t.CommitContext(context.Background())
+}
+func (t *transactionImpl) CommitContext(ctx context.Context) error {
 	isEmpty := true
 	var commitErr error
 	t.messageSendReceiptMap.Range(func(_, value interface{}) bool {
 		isEmpty = false
 		pubMessage := value.([]interface{})[0].(*PublishingMessage)
 		sendReceipt := value.([]interface{})[1].(*SendReceipt)
-		err := t.producerImpl.(*defaultProducer).endTransaction(context.TODO(), sendReceipt.Endpoints,
+		err := t.producerImpl.(*defaultProducer).endTransaction(ctx, sendReceipt.Endpoints,
 			pubMessage.msg.GetMessageCommon(), sendReceipt.MessageID, sendReceipt.TransactionId, COMMIT)
 		if err != nil {
 			commitErr = fmt.Errorf("transaction message commit failed: %w", err)
@@ -83,13 +96,16 @@ func (t *transactionImpl) Commit() error {
 }
 
 func (t *transactionImpl) RollBack() error {
+	return t.RollBackContext(context.Background())
+}
+func (t *transactionImpl) RollBackContext(ctx context.Context) error {
 	isEmpty := true
 	var rollbackErr error
 	t.messageSendReceiptMap.Range(func(_, value interface{}) bool {
 		isEmpty = false
 		pubMessage := value.([]interface{})[0].(*PublishingMessage)
 		sendReceipt := value.([]interface{})[1].(*SendReceipt)
-		err := t.producerImpl.(*defaultProducer).endTransaction(context.TODO(), sendReceipt.Endpoints,
+		err := t.producerImpl.(*defaultProducer).endTransaction(ctx, sendReceipt.Endpoints,
 			pubMessage.msg.GetMessageCommon(), sendReceipt.MessageID, sendReceipt.TransactionId, ROLLBACK)
 		if err != nil {
 			rollbackErr = fmt.Errorf("transaction message rollback failed: %w", err)

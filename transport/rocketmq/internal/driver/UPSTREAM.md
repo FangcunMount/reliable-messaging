@@ -23,5 +23,13 @@ fixed upstream release can pass the same gates.
 
 Startup failure shutdown broadcasts channel closure and closes its RPC manager;
 it must not wait for an absent unbuffered channel reader. The TLS rejection test
-also checks that startup returns within its bounded failure budget. Full worker
-join/transaction callback saturation proofs remain later M2 work.
+also checks that startup returns within its bounded failure budget. The additional `transaction-runtime.patch` carries caller contexts through both
+connection establishment and Commit/Rollback, bounds initial-settings startup,
+provides pre-goroutine recovery admission, and joins owned client/session
+workers. Interruptible initial delays and closed-manager connection rejection
+prevent background resources from being recreated during shutdown.
+
+Local real-TLS tests cover commit/rollback cancellation, cold TLS connection
+budgets, missing initial settings, 1000 recovery commands behind one admission
+slot, and scheduled-worker shutdown. Adapter queue/drain and real Broker
+transaction proofs are separate gates; these tests do not replace them.

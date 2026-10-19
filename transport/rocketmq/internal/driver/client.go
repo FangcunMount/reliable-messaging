@@ -28,7 +28,6 @@ import (
 	"time"
 
 	innerMD "github.com/apache/rocketmq-clients/golang/v5/metadata"
-	"github.com/apache/rocketmq-clients/golang/v5/pkg/ticker"
 	"github.com/apache/rocketmq-clients/golang/v5/pkg/utils"
 	v2 "github.com/apache/rocketmq-clients/golang/v5/protocol/v2"
 	"github.com/google/uuid"
@@ -102,7 +101,9 @@ func (cs *defaultClientSession) _execute_server_telemetry_command(command *v2.Te
 
 func (cs *defaultClientSession) startUp() {
 	cs.cli.log.Infof("defaultClientSession is startUp! endpoints=%v", cs.endpoints)
+	cs.cli.sessionWG.Add(1)
 	go func() {
+		defer cs.cli.sessionWG.Done()
 		for {
 			select {
 			case <-cs.cli.done:
@@ -120,15 +121,22 @@ func (cs *defaultClientSession) startUp() {
 				// If the client has not yet initialized, propagate the error to startUp() so it can
 				// return immediately instead of blocking forever waiting for settings.
 				if !cs.cli.inited.Load() {
-					cs.cli.startUpError = fmt.Errorf("failed to sync settings during startUp: %w", err)
-					cs.cli.log.Error(cs.cli.startUpError)
+					startupErr := fmt.Errorf("failed to sync settings during startUp: %w", err)
+					cs.cli.startUpErrorLock.Lock()
+					cs.cli.startUpError = startupErr
+					cs.cli.startUpErrorLock.Unlock()
+					cs.cli.log.Error(startupErr)
 					return
 				}
 				// we are recovering
 				if !cs.recovering {
 					cs.cli.log.Infof("Encountered error while receiving TelemetryCommand, trying to recover, err=%v", err)
 					// we wait five seconds to give time for the transmission error to be resolved externally before we attempt to read the message again.
-					time.Sleep(cs.recoveryWaitTime)
+					select {
+					case <-cs.cli.done:
+						return
+					case <-time.After(cs.recoveryWaitTime):
+					}
 					cs.recovering = true
 				} else {
 					// we are recovering but we failed to read the message again, resetting observer
@@ -238,6 +246,8 @@ type defaultClient struct {
 	on                            atomic.Bool
 	inited                        atomic.Bool
 	startUpError                  error
+	startUpErrorLock              sync.Mutex
+	sessionWG                     sync.WaitGroup
 	clientImpl                    isClient
 	ReceiveReconnect              bool
 	notifyUnsubscribeLiteFunc     func(*v2.NotifyUnsubscribeLiteCommand)
@@ -543,7 +553,9 @@ func (cli *defaultClient) newClientManager() *defaultClientManager {
 	return NewDefaultClientManager(rpcOptions...)
 }
 
-func (cli *defaultClient) startUp() error {
+func (cli *defaultClient) startUp() error { return cli.startUpContext(context.Background()) }
+
+func (cli *defaultClient) startUpContext(ctx context.Context) error {
 	cli.log.Infof("begin to start the rocketmq client")
 	cm := cli.newClientManager()
 	cm.startUp()
@@ -551,7 +563,7 @@ func (cli *defaultClient) startUp() error {
 	cli.clientManager = cm
 
 	for _, topic := range cli.initTopics {
-		_, err := cli.getMessageQueues(context.Background(), topic)
+		_, err := cli.getMessageQueues(ctx, topic)
 		if err != nil {
 			return fmt.Errorf("failed to get topic route data result from remote during client startup, clientId=%s, topics=%v, err=%v", cli.clientID, cli.initTopics, err)
 		}
@@ -599,15 +611,29 @@ func (cli *defaultClient) startUp() error {
 			return true
 		})
 	}
-	ticker.Tick(f, time.Second*30, cli.done)
+	cm.startLoop(time.Second*30, time.Second*30, f)
 
-	// wait syncSettings finish
+	// Initial settings must not outlive startup or its configured budget.
+	initialDeadline := time.NewTimer(cli.opts.timeout)
+	defer initialDeadline.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for !cli.inited.Load() {
-		if cli.startUpError != nil {
-			return cli.startUpError
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-cli.done:
+			return fmt.Errorf("client closed during startup")
+		case <-initialDeadline.C:
+			return fmt.Errorf("initial settings deadline exceeded")
+		case <-poll.C:
 		}
-		sugarBaseLogger.Infoln("wait for sync settings finish")
-		time.Sleep(time.Second)
+		cli.startUpErrorLock.Lock()
+		startupErr := cli.startUpError
+		cli.startUpErrorLock.Unlock()
+		if startupErr != nil {
+			return startupErr
+		}
 	}
 	sugarBaseLogger.Infoln("sync settings finished")
 	return nil
@@ -625,8 +651,8 @@ func routeEqual(old, new []*v2.MessageQueue) bool {
 	return true
 }
 
-func (cli *defaultClient) notifyClientTermination() {
-	ctx := cli.Sign(context.Background())
+func (cli *defaultClient) notifyClientTermination(ctx context.Context) {
+	ctx = cli.Sign(ctx)
 	request := &v2.NotifyClientTerminationRequest{
 		Group: &v2.Resource{
 			ResourceNamespace: cli.config.NameSpace,
@@ -647,11 +673,13 @@ func (cli *defaultClient) notifyClientTermination() {
 	}
 }
 
-func (cli *defaultClient) GracefulStop() error {
+func (cli *defaultClient) GracefulStop() error { return cli.gracefulStopContext(context.Background()) }
+
+func (cli *defaultClient) gracefulStopContext(ctx context.Context) error {
 	if !cli.on.CAS(true, false) {
 		return fmt.Errorf("client has been closed")
 	}
-	cli.notifyClientTermination()
+	cli.notifyClientTermination(ctx)
 	if cli.clientManager != nil {
 		cli.clientManager.UnRegisterClient(cli)
 	}
@@ -659,6 +687,7 @@ func (cli *defaultClient) GracefulStop() error {
 	if manager, ok := cli.clientManager.(*defaultClientManager); ok {
 		manager.shutdown()
 	}
+	cli.sessionWG.Wait()
 	cli.clientMeterProvider.Reset(&v2.Metric{
 		On: false,
 	})

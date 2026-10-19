@@ -42,6 +42,11 @@ type Producer interface {
 	isClient
 }
 
+type ContextProducer interface {
+	Producer
+	StartContext(context.Context) error
+}
+
 type defaultProducer struct {
 	po       producerOptions
 	pSetting *producerSettings
@@ -52,12 +57,14 @@ type defaultProducer struct {
 	publishingRouteDataResultCache sync.Map
 }
 
-func (p *defaultProducer) Start() error {
-	err := p.cli.startUp()
+func (p *defaultProducer) Start() error { return p.StartContext(context.Background()) }
+
+func (p *defaultProducer) StartContext(ctx context.Context) error {
+	err := p.cli.startUpContext(ctx)
 	if err == nil {
 		return nil
 	}
-	err2 := p.GracefulStop()
+	err2 := p.cli.gracefulStopContext(ctx)
 	if err2 != nil {
 		return fmt.Errorf("startUp err=%w, shutdown err=%v", err, err2)
 	}
@@ -433,7 +440,7 @@ func (p *defaultProducer) BeginTransaction() Transaction {
 }
 
 func (p *defaultProducer) endTransaction(ctx context.Context, endpoints *v2.Endpoints, messageCommon *MessageCommon,
-	messageId string, transactionId string, resolution TransactionResolution) error {
+	messageId string, transactionId string, resolution TransactionResolution, source ...v2.TransactionSource) error {
 
 	ctx = p.cli.Sign(ctx)
 	request := &v2.EndTransactionRequest{
@@ -443,6 +450,10 @@ func (p *defaultProducer) endTransaction(ctx context.Context, endpoints *v2.Endp
 		},
 		MessageId:     messageId,
 		TransactionId: transactionId,
+		Source:        v2.TransactionSource_SOURCE_CLIENT,
+	}
+	if len(source) > 0 {
+		request.Source = source[0]
 	}
 	switch resolution {
 	case COMMIT:
@@ -477,20 +488,35 @@ func (p *defaultProducer) endTransaction(ctx context.Context, endpoints *v2.Endp
 }
 
 func (p *defaultProducer) onRecoverOrphanedTransactionCommand(endpoints *v2.Endpoints, command *v2.RecoverOrphanedTransactionCommand) error {
+	if command == nil || command.GetMessage() == nil || command.GetMessage().GetSystemProperties() == nil || command.GetMessage().GetTopic() == nil || command.GetMessage().GetSystemProperties().GetBodyDigest() == nil {
+		return fmt.Errorf("invalid transaction recovery command")
+	}
 	transactionId := command.GetTransactionId()
 	messageId := command.GetMessage().GetSystemProperties().MessageId
 	if p.checker == nil {
 		return fmt.Errorf("no transaction checker registered, ignore it, messageId=%s, transactionId=%s, endpoints=%v", messageId, transactionId, endpoints)
 	}
 	messageView := fromProtobuf_MessageView0(command.Message)
-	go func(mv *MessageView) {
-		resolution := p.po.checker.Check(mv)
-		err := p.endTransaction(context.TODO(), endpoints,
-			mv.GetMessageCommon(), messageId, transactionId, resolution)
+	work := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), p.pSetting.requestTimeout)
+		defer cancel()
+		resolution := UNKNOWN
+		if p.checker.CheckContext != nil {
+			resolution = p.checker.CheckContext(ctx, messageView)
+		} else if p.checker.Check != nil {
+			resolution = p.checker.Check(messageView)
+		}
+		err := p.endTransaction(ctx, endpoints,
+			messageView.GetMessageCommon(), messageId, transactionId, resolution, v2.TransactionSource_SOURCE_SERVER_CHECK)
 		if err != nil {
 			p.cli.log.Errorf("exception raised while ending the transaction, messageId=%s, transactionId=%s, endpoints=%v, err=%w", messageId, transactionId, endpoints, err)
 		}
-	}(messageView)
+	}
+	if p.checker.Dispatch != nil {
+		p.checker.Dispatch(work)
+		return nil
+	}
+	go work()
 	return nil
 }
 

@@ -43,11 +43,12 @@
     "user_agent.go": "74cb4a11296820f6a60c0d390137b40ac1670e57e56825e4cc9d3ca5d616926a"
   },
   "patches": [
-    "rpc-options.patch"
+    "rpc-options.patch",
+    "transaction-runtime.patch"
   ],
   "patched_sha256": {
-    "client.go": "c30037533e05896e4564c7ee5d773ef842b16778af61d00ad78df81c2dec9f33",
-    "client_manager.go": "f25a3b1f6559134d41466810394370a6de6bb74ab0fac8b1c42c39750ddde5e3",
+    "client.go": "bc91af75116e553114939c383ae54cf5694ede1344bfb3381e9804ba690a3e4e",
+    "client_manager.go": "47d8110bd92821831c5f35ac18ca673eabc14cd99c2cbf4b1215dfd760677782",
     "client_manager_mock.go": "f60e472d5976e0ee2bd95edfc9103a658e6859ece93de038fedb5830c618997d",
     "client_mock.go": "06317cad9e81b3de1874f091a347f8826d2852b6972f7d21d8a66202316bf8f1",
     "client_options.go": "dfc39180a3e6e7ff73bef35e2b6c081b8b146e3ff7b28ef3243e9890802d726d",
@@ -69,7 +70,7 @@
     "metric.go": "40f077d2aff82fee8f9159e765f9f58cc4846d07a40d97e58493e9139db34e2e",
     "name_resolver.go": "8aaa51e30fdd0cdbe358076eb749ac67cbbc51107a559d729108218498e9fe37",
     "process_queue.go": "6d51d1a8c44a6c575a2c8ad2155b12e95027872a295cd7df822761604c9ef39f",
-    "producer.go": "cc2876d9901536d11fdadd268a89398590de615a83ec19442ea129512055c1e9",
+    "producer.go": "b353cae59246febec5775334c8d816b672d6ff5808916c3cc39c5b9ede1791c1",
     "producer_options.go": "3fa2e4359be26f6cabb3ae2deed3a53bb7a8d69978b61d4c463cda8893765e4c",
     "publishing_message.go": "b6c06219bae4d0fbc9e961f41d9dd56769d21053b42f6ff1f2629da7c13e3fce",
     "push_consumer.go": "6e44d25c71a71fa0a78a9daeb3be97568d83ab9404450e892eb3710e2d6d6480",
@@ -82,7 +83,7 @@
     "simple_consumer_options.go": "d24c4def53f00b324eb4cea6d498d87e2127f0f65d20ce1e0c48a116aca88f72",
     "simple_thread_pool.go": "f6e3ec76238822539484d9c0c96b3761741d8adf979f6bf46616012dcf42bd64",
     "trace.go": "1a480254170cb1d09533ce00e6e696d6868189e560115d5108a28dd8efb3cdf9",
-    "transaction.go": "0f6c02266af8f0adbdb017af25d8a3ede3e49e2dc80c6ca14ed536175ef2e905",
+    "transaction.go": "aa5efa55f0309bfd5a7eee7be390feabe29efb40949e25b71982e6fc3e750e5b",
     "user_agent.go": "74cb4a11296820f6a60c0d390137b40ac1670e57e56825e4cc9d3ca5d616926a"
   }
 }
