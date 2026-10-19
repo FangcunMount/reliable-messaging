@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from reliable_messaging.message import Message
 from reliable_messaging.transaction import (
     Decision,
