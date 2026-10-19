@@ -371,10 +371,25 @@ def main():
     try:
         asyncio.run(run(args))
     except Exception as error:
-        if getattr(error, "code", None) in (40100, 40300):
-            emit("broker_denied", decision=str(error.code))
+        from reliable_messaging._rocketmq_transaction_driver import rejection_code
+
+        code = rejection_code(error)
+        emit("failure_code", decision=code or type(error).__name__)
+        if code in (
+            "half_rejected_40100",
+            "half_rejected_40300",
+            "half_rejected_grpc_permission_denied",
+            "half_rejected_grpc_unauthenticated",
+        ):
+            emit("broker_denied", decision=code)
         elif isinstance(error, TransactionSendError) and any(
-            b.error_code in ("half_rejected_40100", "half_rejected_40300")
+            b.error_code
+            in (
+                "half_rejected_40100",
+                "half_rejected_40300",
+                "half_rejected_grpc_permission_denied",
+                "half_rejected_grpc_unauthenticated",
+            )
             for b in error.result.branches
         ):
             emit("broker_denied", decision="half_rejected")

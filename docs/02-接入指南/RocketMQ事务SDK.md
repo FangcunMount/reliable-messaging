@@ -44,7 +44,7 @@ sequenceDiagram
 
 Go 同时检查返回的 `transaction.Result` 和 error；Python 捕获 `TransactionSendError` 后检查 `.result`。`LocalCommitted + FinalUnknown` 是合法状态，不能重做业务或换 ID 补发。取消、关闭超时和 lease 到期本身均不是 Rollback 证明。部分准备或崩溃仍保留原分支身份和未知 Broker ID；不能捏造确认信息。
 
-`Store.Lookup` 返回原计划/执行状态。重试同计划的新 fence 或重建新计划必须由宿主调用明确的 `Advance` 接口，并先证明旧 execution/全部分支 Aborted。新计划代次必须使用新 operation；旧计划/执行/终态永久保留，本批没有证据 GC。fence 为 `1..2^63-1`，身份按原 UTF-8 bytes 精确比较，首次 wire 直接保存 bytes，不经 JSON 重建或重新签名/加密。
+`Store.Lookup` 返回原计划/执行状态。重试同计划的新 fence 或重建新计划必须由宿主调用明确的 `AuthorizedStore.Retry` / `Replan` 接口（Python 对应 `retry` / `replan`），并先证明旧 execution/全部分支 Aborted。新计划代次必须使用新 operation；旧计划/执行/终态永久保留，本批没有证据 GC。fence 为 `1..2^63-1`，身份按原 UTF-8 bytes 精确比较，首次 wire 直接保存 bytes，不经 JSON 重建或重新签名/加密。
 
 ## 存储安装与适配矩阵
 
@@ -96,3 +96,21 @@ infra `scripts/rocketmq/audit_transaction_limit.py` 只读查询固定5.5.1原�
 required 报告非空、0 failed/error/skipped，记录精确源码 SHA、镜像 digest、实际参数、版本、故障边界、用例及清理。TCP 关闭在服务端提交之前和实际 ACK 之后分别证明；客户端主动丢回复单独命名，不能称网络故障。故障代码仅在 disposable loopback fixture 中运行，绝不读取生产凭据。
 
 Go tag与Python tag必须指向同一合并源码 SHA。固定制品重新安装需离开源码工作区，无 Go replace、无 editable/PYTHONPATH；验证 wheel/sdist 摘要与 receipt。候选/发布不代表 IAM、qs-server、qs-ai 采用或业务验收。完整进度唯一入口为 [infra M2 总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m2-execution.md)。
+
+
+## 本批 API 核对记录
+
+2026-10-19 对照实际公开入口、适配及测试核对；真实门禁与发布状态仍由 infra 总表和发布 receipt 记录。
+
+| 边界 | Go / Python 实际入口 | 核对结论 |
+| --- | --- | --- |
+| 事务发送 | `rocketmq.TransactionalSender` / `rocketmq_transaction.TransactionalSender` | 普通 Publisher 保持独立；Reserve 冻结后 Execute 一次 |
+| 显式业务授权 | `AuthorizedStore.Retry`、`Replan` / `retry`、`replan` | 不存在自动 Advance 或 Checker 业务重试入口 |
+| 原事务 guard | MySQL `Bind`/`BindGORM`、Mongo `Bind` / SQLAlchemy `bind` | 写 guard、业务、全部 witness 同根提交；构造/Start 不执行 DDL |
+| 证据与 metadata | codec/schema `1`；route revision 按宿主显式配置 | v2 指路由格式，不代表变更旧 Outbox 或重写原 wire |
+| 生命周期 | `Start`、`StopAdmission`、`Close`、`Wait` / 对应 async 入口 | Wait 延续实际排空，关闭超时不虚报资源已停止 |
+| 观察结果 | `Stats` / `stats()` | 只含有限字段及计数；不使用业务 ID/tenant/body/凭据作指标标签 |
+
+计划摘要保留早期固定的 `rm-tx-plan-draft-v1` domain，以及消息 fingerprint 的既有 domain，避免跨语言/已冻结计划发生无声改变；它们是固定 bytes，不表示发布后的 hash 可随意重命名。后续不兼容 schema、codec、路由或摘要变更需要另起版本与显式迁移。
+
+原生超限 CLI 成功导出真实索引证据时输出 critical 告警并返回退出码2，提醒宿主明确封新准入；这不是自动业务恢复或生产告警已安装的声明。发布后验收另外核对下载的依赖锁；SDK 包及依赖从固定制品安装，不导入工作区源码。

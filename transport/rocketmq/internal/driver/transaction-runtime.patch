@@ -38,6 +38,9 @@
 @@ -554 +569 @@
 -		_, err := cli.getMessageQueues(context.Background(), topic)
 +		_, err := cli.getMessageQueues(ctx, topic)
+@@ -556 +571 @@
+-			return fmt.Errorf("failed to get topic route data result from remote during client startup, clientId=%s, topics=%v, err=%v", cli.clientID, cli.initTopics, err)
++			return fmt.Errorf("failed to get topic route data result from remote during client startup, clientId=%s, topics=%v, err=%w", cli.clientID, cli.initTopics, err)
 @@ -602,3 +617,7 @@
 -	ticker.Tick(f, time.Second*30, cli.done)
 -

@@ -1,6 +1,6 @@
-"""Provisional transaction-message contracts; no I/O or transaction ownership.
+"""Versioned transaction-message contracts; no I/O or transaction ownership.
 
-Public API stability awaits RocketMQ M2 original MySQL/Mongo transaction proofs.
+Fixed prerelease and real dependency evidence are separate from host adoption.
 These producer outcomes never describe consumer effects or business receipts.
 """
 

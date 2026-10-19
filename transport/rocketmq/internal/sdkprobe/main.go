@@ -33,6 +33,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type config struct {
@@ -55,8 +57,17 @@ func emit(event, id, decision string) {
 func main() {
 	if err := run(); err != nil {
 		var rpcStatus *driver.ErrRpcStatus
-		if errors.As(err, &rpcStatus) && (rpcStatus.Code == 40100 || rpcStatus.Code == 40300) {
-			emit("broker_denied", "", fmt.Sprint(rpcStatus.Code))
+		if errors.As(err, &rpcStatus) {
+			emit("failure_code", "", fmt.Sprintf("rocketmq_%d", rpcStatus.Code))
+			if rpcStatus.Code == 40100 || rpcStatus.Code == 40300 {
+				emit("broker_denied", "", fmt.Sprint(rpcStatus.Code))
+			}
+		} else {
+			code := status.Code(err)
+			emit("failure_code", "", "grpc_"+code.String())
+			if code == codes.PermissionDenied || code == codes.Unauthenticated {
+				emit("broker_denied", "", "grpc_"+code.String())
+			}
 		}
 		emit("failed", "", "sdk_operation_failed")
 		os.Exit(1)

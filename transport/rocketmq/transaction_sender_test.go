@@ -14,6 +14,8 @@ import (
 	"github.com/FangcunMount/reliable-messaging/transaction"
 	"github.com/FangcunMount/reliable-messaging/transport"
 	driver "github.com/FangcunMount/reliable-messaging/transport/rocketmq/internal/driver"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 // These fakes prove orchestration only. Real adapters/Broker are separate gates.
@@ -400,4 +402,23 @@ func transactionTestTopic(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return topic
+}
+
+func TestHalfRejectionRequiresStructuredProtocolRefusal(t *testing.T) {
+	tests := []struct {
+		err  error
+		want string
+	}{
+		{&driver.ErrRpcStatus{Code: 40300}, "half_rejected_40300"},
+		{fmt.Errorf("startup: %w", grpcstatus.Error(codes.PermissionDenied, "synthetic refusal")), "half_rejected_grpc_permission_denied"},
+		{grpcstatus.Error(codes.Unauthenticated, "synthetic refusal"), "half_rejected_grpc_unauthenticated"},
+		{grpcstatus.Error(codes.Unavailable, "synthetic connection loss"), ""},
+		{context.DeadlineExceeded, ""},
+		{errors.New("PermissionDenied text is not proof"), ""},
+	}
+	for _, test := range tests {
+		if got := rejectedHalfCode(test.err); got != test.want {
+			t.Fatalf("structured rejection %q, want %q", got, test.want)
+		}
+	}
 }

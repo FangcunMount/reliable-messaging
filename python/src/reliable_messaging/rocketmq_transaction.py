@@ -166,14 +166,7 @@ class TransactionalSender:
         def completed(done: asyncio.Future[Any]) -> None:
             self._calls.discard(done)
             if not done.cancelled():
-                error = done.exception()
-                result = (
-                    error.result
-                    if isinstance(error, TransactionSendError)
-                    else (done.result() if error is None else None)
-                )
-                if isinstance(result, Result):
-                    self._record_result(result)
+                done.exception()
 
         future.add_done_callback(completed)
         # Operation/Close cancellation never releases a real blocking call.
@@ -396,13 +389,12 @@ class TransactionalSender:
             try:
                 receipt, handles[i] = await self._call(self._prepare, branches[i].reference, branch)
             except Exception as error:
-                code = getattr(error, "code", None)
-                rejected = isinstance(code, int) and (
-                    40000 <= code < 40600 or 41300 <= code < 41400
-                )
+                from ._rocketmq_transaction_driver import rejection_code
+
+                code = rejection_code(error)
                 receipt = HalfReceipt(
-                    HalfOutcome.REJECTED if rejected else HalfOutcome.UNKNOWN,
-                    error_code=f"half_rejected_{code}" if rejected else "half_rpc_unknown",
+                    HalfOutcome.REJECTED if code else HalfOutcome.UNKNOWN,
+                    error_code=code or "half_rpc_unknown",
                 )
             branches[i] = replace(
                 branches[i],
