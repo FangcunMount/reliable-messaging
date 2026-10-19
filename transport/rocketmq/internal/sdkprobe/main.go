@@ -220,12 +220,39 @@ func run() error {
 	limits.ReconcileInterval = 200 * time.Millisecond
 	limits.RPCTimeout = 5 * time.Second
 	limits.CheckTimeout = 2 * time.Second
-	sender, err := rocketmq.NewTransactionalSender(rocketmq.TransactionConfig{Endpoint: c.Endpoint, AccessKey: c.AccessKey, SecretKey: c.SecretKey, TLS: tlsConfig, Owner: c.Owner, Routes: []rocketmq.TransactionRoute{{LogicalTopic: "sdk.logical", PhysicalTopic: c.Topic, Revision: "sdk-v2"}}, Limits: limits}, store)
+	sdkConfig := rocketmq.TransactionConfig{Endpoint: c.Endpoint, AccessKey: c.AccessKey, SecretKey: c.SecretKey, TLS: tlsConfig, Owner: c.Owner, Routes: []rocketmq.TransactionRoute{{LogicalTopic: "sdk.logical", PhysicalTopic: c.Topic, Revision: "sdk-v2"}}, Limits: limits}
+	sender, err := rocketmq.NewTransactionalSender(sdkConfig, store)
 	if err != nil {
 		return err
 	}
 	if err = sender.Start(ctx); err != nil {
+		closeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if closeErr := sender.Close(closeCtx); closeErr != nil {
+			return closeErr
+		}
+		if !sender.Stats().Stopped {
+			return errors.New("failed startup still owns resources")
+		}
+		emit("closed", *id, "failed_start_drained")
 		return err
+	}
+	if *mode == "isolation" {
+		other, otherErr := rocketmq.NewTransactionalSender(sdkConfig, store)
+		if otherErr != nil {
+			return otherErr
+		}
+		if otherErr = other.Start(ctx); otherErr != nil {
+			return otherErr
+		}
+		closeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		otherErr = sender.Close(closeCtx)
+		cancel()
+		if otherErr != nil {
+			return otherErr
+		}
+		sender = other
+		emit("isolated", *id, "first_closed_second_ready")
 	}
 	closeSender := func() error {
 		closeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
