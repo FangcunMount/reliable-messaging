@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "plans": [
+    {
+      "version": 1,
+      "owner": "qs.mysql",
+      "scope": "org:19",
+      "operation_id": "op-sql",
+      "idempotency_key": "request-key",
+      "input_hash": "d014808624f8b42f2816a25f7eb869a1b9189024f70d98ffed5f83730a17d6ba",
+      "plan_digest": "5dcbd6fa4be3614fc5760eadf813af23784d9ef8125d640cfee4afad60087437",
+      "branches": [
+        {
+          "branch_id": "branch-0",
+          "physical_topic": "tx-qs-mysql-0",
+          "route_revision": "2",
+          "message": {
+            "producer": "qs.apiserver",
+            "message_id": "event-a",
+            "destination": "qs.evaluation.failed",
+            "event_type": "fixture.event",
+            "schema_version": "1",
+            "scope": "org:19",
+            "content_type": "application/json",
+            "occurred_at": "2026-10-19T00:00:00.123456789+08:00",
+            "payload": "eyJmYWN0Ijp0cnVlfQ=="
+          },
+          "wire": "Zmlyc3QtZnJvemVuLXdpcmUA/zA="
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "owner": "qs.mongo",
+      "scope": "org:测试",
+      "operation_id": "操作-mongo",
+      "idempotency_key": "request-key",
+      "input_hash": "d014808624f8b42f2816a25f7eb869a1b9189024f70d98ffed5f83730a17d6ba",
+      "plan_digest": "60cc4b34a3ced2dfcb1b40172527fe867e9ed51a18344ed96ba805b4e1055290",
+      "branches": [
+        {
+          "branch_id": "branch-0",
+          "physical_topic": "tx-qs-mongo-0",
+          "route_revision": "2",
+          "message": {
+            "producer": "qs.apiserver",
+            "message_id": "提交-1",
+            "destination": "qs.answersheet.submitted",
+            "event_type": "fixture.event",
+            "schema_version": "1",
+            "scope": "org:测试",
+            "content_type": "application/json",
+            "occurred_at": "2026-10-19T00:00:00.123456789+08:00",
+            "payload": "AP8A"
+          },
+          "wire": "Zmlyc3QtZnJvemVuLXdpcmUA/zA="
+        },
+        {
+          "branch_id": "branch-1",
+          "physical_topic": "tx-qs-mongo-1",
+          "route_revision": "2",
+          "message": {
+            "producer": "qs.apiserver",
+            "message_id": "提交-2",
+            "destination": "qs.answersheet.submitted",
+            "event_type": "fixture.event",
+            "schema_version": "1",
+            "scope": "org:测试",
+            "content_type": "application/json",
+            "occurred_at": "2026-10-19T00:00:00.123456789+08:00",
+            "payload": "AP8B"
+          },
+          "wire": "Zmlyc3QtZnJvemVuLXdpcmUA/zE="
+        }
+      ]
+    }
+  ],
+  "keys": [
+    {
+      "reference": {
+        "owner": "qs.mysql",
+        "scope": "org:19",
+        "operation_id": "op-sql",
+        "branch_id": "branch-0",
+        "message_id": "event-a",
+        "logical_topic": "qs.evaluation.failed",
+        "physical_topic": "tx-qs-mysql-0",
+        "route_revision": "2",
+        "writer_epoch": "epoch",
+        "plan_digest": "5dcbd6fa4be3614fc5760eadf813af23784d9ef8125d640cfee4afad60087437",
+        "wire_hash": "d2b5dc3f97a93af1f9dba3eb903f0d51f5ad4016194cde2b22f0bbf3e2f96d7f",
+        "message_fingerprint": "db0eb45118a92f856fdb2c003e49ea9bccbdc976515565a201c0144a51626b18",
+        "fence": 1
+      },
+      "execution_key": "8efb6a06cb4545559eb2c9ba33c5494b5e798bc698238b92649c20c3a53c74dc",
+      "request_key": "b30b783d9107767679523d1b98a35b2d3c3ec5daa0d15dc1a33b0a127b0867c7"
+    },
+    {
+      "reference": {
+        "owner": "qs.mongo",
+        "scope": "org:测试",
+        "operation_id": "操作-mongo",
+        "branch_id": "branch-0",
+        "message_id": "提交-1",
+        "logical_topic": "qs.answersheet.submitted",
+        "physical_topic": "tx-qs-mongo-0",
+        "route_revision": "2",
+        "writer_epoch": "epoch",
+        "plan_digest": "60cc4b34a3ced2dfcb1b40172527fe867e9ed51a18344ed96ba805b4e1055290",
+        "wire_hash": "d2b5dc3f97a93af1f9dba3eb903f0d51f5ad4016194cde2b22f0bbf3e2f96d7f",
+        "message_fingerprint": "369b0adb6f2cf19d7a41384a94d8e50a84f7f30d716084f7afb306598664b31d",
+        "fence": 1
+      },
+      "execution_key": "ce9f077f8f77e743ab79ee94b0168f37141acc7fda50c8c1548d886a818e0345",
+      "request_key": "6b9d283c1bcaec9fd7c7aca9355077bcbfe80a8956c665a8fd514045d3b71431"
+    }
+  ]
+}

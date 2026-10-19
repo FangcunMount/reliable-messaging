@@ -8,10 +8,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash"
+	"math"
 	"unicode/utf8"
 
 	"github.com/FangcunMount/reliable-messaging/message"
 )
+
+const MaxFence uint64 = math.MaxInt64
+const MaxBranches = 16
 
 var (
 	ErrInvalidPlan     = errors.New("invalid frozen transaction plan")
@@ -64,11 +68,17 @@ func field(h hash.Hash, value []byte) {
 }
 
 func NewPlan(in PlanInput) (FrozenPlan, error) {
-	if !required(in.Owner, in.Scope, in.OperationID, in.IdempotencyKey) || len(in.Branches) == 0 {
+	if !required(in.Owner, in.Scope, in.OperationID, in.IdempotencyKey) || len(in.Branches) == 0 || len(in.Branches) > MaxBranches {
+		return FrozenPlan{}, ErrInvalidPlan
+	}
+	if len(in.Owner) > 128 || len(in.Scope) > 255 || len(in.OperationID) > 128 || len(in.IdempotencyKey) > 1024 {
 		return FrozenPlan{}, ErrInvalidPlan
 	}
 	ids := make(map[string]bool, len(in.Branches))
 	for _, branch := range in.Branches {
+		if len(branch.ID) > 128 || len(branch.PhysicalTopic) > 255 || len(branch.RouteRevision) > 128 {
+			return FrozenPlan{}, ErrInvalidPlan
+		}
 		if !required(branch.ID, branch.PhysicalTopic, branch.RouteRevision) || ids[branch.ID] || !branch.Message.Valid() || len(branch.Wire) == 0 || branch.Message.Input().Scope != in.Scope {
 			return FrozenPlan{}, ErrInvalidPlan
 		}
