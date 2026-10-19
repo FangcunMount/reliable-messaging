@@ -9,6 +9,7 @@ import math
 import threading
 from collections.abc import Callable, Coroutine
 from concurrent.futures import Future, ThreadPoolExecutor
+from importlib.metadata import version
 from typing import Any
 
 
@@ -95,6 +96,8 @@ def create_producer(
     pool: RecoveryPool,
     checker: Callable[[Any], Coroutine[Any, Any, int]],
 ) -> Any:
+    if version("rocketmq-python-client") != "5.1.2":
+        raise RuntimeError("transaction adaptation requires pinned rocketmq-python-client 5.1.2")
     from rocketmq.grpc_protocol import (  # type: ignore[import-untyped]
         Code,
         TransactionResolution,
@@ -115,6 +118,19 @@ def create_producer(
                 # Upstream startup failure sets is_running=False; its shutdown
                 # then returns early. Still close THIS instance's channels.
                 self.rpc_client.stop()
+
+        def _Producer__check_send_retry_condition(
+            self,
+            message: Any,
+            topic_queue: Any,
+            attempt: int,
+            error: Exception,
+        ) -> Future[Any]:
+            # The pinned synchronous send loop resolves this INSTANCE hook.
+            # Telemetry cannot authorize a second physical half-message RPC.
+            done: Future[Any] = Future()
+            done.set_exception(error)
+            return done
 
         def reset_setting(self, settings: Any) -> None:
             super().reset_setting(settings)

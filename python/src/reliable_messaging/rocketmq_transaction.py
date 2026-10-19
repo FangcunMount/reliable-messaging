@@ -358,8 +358,15 @@ class TransactionalSender:
                 raise TransactionSendError("caller_cancelled_before_local", result())
             try:
                 receipt, handles[i] = await self._call(self._prepare, branches[i].reference, branch)
-            except Exception:
-                receipt = HalfReceipt(HalfOutcome.UNKNOWN, error_code="half_rpc_unknown")
+            except Exception as error:
+                code = getattr(error, "code", None)
+                rejected = isinstance(code, int) and (
+                    40000 <= code < 40600 or 41300 <= code < 41400
+                )
+                receipt = HalfReceipt(
+                    HalfOutcome.REJECTED if rejected else HalfOutcome.UNKNOWN,
+                    error_code="half_rejected" if rejected else "half_rpc_unknown",
+                )
             branches[i] = replace(
                 branches[i],
                 half=receipt.outcome,

@@ -86,6 +86,7 @@ class Client:
         self._init_settings_event.set()
         self.started = self.stopped = self.sent = self.committed = self.aborted = 0
         self.fail_send_at = None
+        self.send_error = None
         self.fail_final = False
         self.send_started = threading.Event()
         self.send_release = None
@@ -110,7 +111,7 @@ class Client:
         if self.send_release is not None:
             self.send_release.wait()
         if self.sent == self.fail_send_at:
-            raise TimeoutError("synthetic half reply loss")
+            raise self.send_error or TimeoutError("synthetic half reply loss")
         return SimpleNamespace(
             message_id="broker-" + str(self.sent), transaction_id="transaction-" + str(self.sent)
         )
@@ -351,3 +352,24 @@ async def test_cancellation_during_half_preparation_does_not_start_business():
     client.send_release.set()
     await sender.wait()
     assert calls == 0 and store.state == State.ABORTED and client.aborted == 1
+
+
+async def test_explicit_broker_rejection_is_distinct_from_unknown():
+    class Rejected(Exception):
+        code = 40300
+
+    sender, store, client, execution = fixture()
+    client.fail_send_at, client.send_error = 1, Rejected("synthetic")
+    await sender.start()
+    calls = 0
+
+    async def local(e):
+        nonlocal calls
+        calls += 1
+        return LocalOutcome.COMMITTED
+
+    with pytest.raises(TransactionSendError) as error:
+        await sender.execute(execution, local)
+    assert error.value.result.branches[0].half == HalfOutcome.REJECTED
+    assert calls == 0 and store.state == State.ABORTED
+    await sender.close()

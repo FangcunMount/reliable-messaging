@@ -93,5 +93,8 @@ async def test_real_pinned_producer_dispatches_to_host_loop_without_global_facto
     assert pool.snapshot()["failed"] == 0
     assert producer._Producer__transaction_check_executor._work_queue.qsize() == 0
     assert Producer.on_recover_orphaned_transaction_command is original
+    failure = TimeoutError("synthetic ambiguous half result")
+    no_retry = producer._Producer__check_send_retry_condition(None, None, 2, failure)
+    assert no_retry.exception() is failure
     producer._Client__is_running = False
     await asyncio.to_thread(producer.shutdown)
