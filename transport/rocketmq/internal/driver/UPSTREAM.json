@@ -44,7 +44,8 @@
   },
   "patches": [
     "rpc-options.patch",
-    "transaction-runtime.patch"
+    "transaction-runtime.patch",
+    "settings-snapshot.patch"
   ],
   "patched_sha256": {
     "client.go": "5fcf31e8d9b895cb8fce3f36e1a29b008716b77cafb5427c2ab996a72d598a4b",
@@ -70,8 +71,8 @@
     "metric.go": "40f077d2aff82fee8f9159e765f9f58cc4846d07a40d97e58493e9139db34e2e",
     "name_resolver.go": "8aaa51e30fdd0cdbe358076eb749ac67cbbc51107a559d729108218498e9fe37",
     "process_queue.go": "6d51d1a8c44a6c575a2c8ad2155b12e95027872a295cd7df822761604c9ef39f",
-    "producer.go": "c60264b90abfb02989204ec8ead9e63cae367c9259ebe30b405a6b19af5f0f97",
-    "producer_options.go": "3fa2e4359be26f6cabb3ae2deed3a53bb7a8d69978b61d4c463cda8893765e4c",
+    "producer.go": "99f7e6eac95da4b9aaa6208962b8f772deeb575ef524db3631acda2ce6a3bd97",
+    "producer_options.go": "6aca132e75aae5558d3fd455e02909730b64302176f0d34be4e12ec9b2e2da57",
     "publishing_message.go": "b6c06219bae4d0fbc9e961f41d9dd56769d21053b42f6ff1f2629da7c13e3fce",
     "push_consumer.go": "6e44d25c71a71fa0a78a9daeb3be97568d83ab9404450e892eb3710e2d6d6480",
     "push_consumer_options.go": "07d936b21a433a641a51f0a17ef549b4bf0c90719e86a29f9d848d1d054a6578",

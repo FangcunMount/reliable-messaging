@@ -475,7 +475,7 @@ func (p *defaultProducer) endTransaction(ctx context.Context, endpoints *v2.Endp
 	default:
 		request.Resolution = v2.TransactionResolution_TRANSACTION_RESOLUTION_UNSPECIFIED
 	}
-	requestTimeout := p.pSetting.requestTimeout
+	requestTimeout := p.pSetting.GetRequestTimeout()
 	messageHookPoints := MessageHookPoints_COMMIT_TRANSACTION
 	if resolution == ROLLBACK {
 		messageHookPoints = MessageHookPoints_ROLLBACK_TRANSACTION
@@ -510,7 +510,7 @@ func (p *defaultProducer) onRecoverOrphanedTransactionCommand(endpoints *v2.Endp
 	}
 	messageView := fromProtobuf_MessageView0(command.Message)
 	work := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), p.pSetting.requestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), p.pSetting.GetRequestTimeout())
 		defer cancel()
 		resolution := UNKNOWN
 		if p.checker.CheckContext != nil {
@@ -538,7 +538,9 @@ func (p *defaultProducer) onVerifyMessageCommand(endpoints *v2.Endpoints, comman
 
 func (p *defaultProducer) SetRequestTimeout(timeout time.Duration) {
 	p.cli.opts.timeout = timeout
+	p.pSetting.settingsMu.Lock()
 	p.pSetting.requestTimeout = p.cli.opts.timeout
+	p.pSetting.settingsMu.Unlock()
 }
 
 func (p *defaultProducer) IsEndpointUpdated() bool {

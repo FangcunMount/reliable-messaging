@@ -33,3 +33,13 @@ Local real-TLS tests cover commit/rollback cancellation, cold TLS connection
 budgets, missing initial settings, 1000 recovery commands behind one admission
 slot, and scheduled-worker shutdown. Adapter queue/drain and real Broker
 transaction proofs are separate gates; these tests do not replace them.
+
+`settings-snapshot.patch` fixes the startup protobuf size mismatch reproduced
+against 5.5.1: an outgoing TelemetryCommand retained the producer's mutable
+RetryPolicy while incoming Broker settings changed its fields and durations.
+Retry-policy access/update now uses a lock and independent protobuf snapshots;
+request-timeout reads/writes use the same settings lock. A deterministic
+regression proves a captured command survives later settings/returned-value
+mutation, and race plus real TLS telemetry tests exercise concurrent updates
+and repeated startup/settings exchanges. This is a source fix, not a transport
+retry or business replay. Public transaction/wire/schema contracts are unchanged.

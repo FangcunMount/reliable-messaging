@@ -25,6 +25,7 @@ import (
 	"go.uber.org/atomic"
 
 	v2 "github.com/apache/rocketmq-clients/golang/v5/protocol/v2"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -90,6 +91,7 @@ func WithTransactionChecker(checker *TransactionChecker) ProducerOption {
 var _ = ClientSettings(&producerSettings{})
 
 type producerSettings struct {
+	settingsMu          sync.RWMutex
 	clientId            string
 	topics              sync.Map
 	endpoints           *v2.Endpoints
@@ -110,9 +112,16 @@ func (ps *producerSettings) GetClientType() v2.ClientType {
 	return ps.clientType
 }
 func (ps *producerSettings) GetRetryPolicy() *v2.RetryPolicy {
-	return ps.retryPolicy
+	ps.settingsMu.RLock()
+	defer ps.settingsMu.RUnlock()
+	if ps.retryPolicy == nil {
+		return nil
+	}
+	return proto.Clone(ps.retryPolicy).(*v2.RetryPolicy)
 }
 func (ps *producerSettings) GetRequestTimeout() time.Duration {
+	ps.settingsMu.RLock()
+	defer ps.settingsMu.RUnlock()
 	return ps.requestTimeout
 }
 func (ps *producerSettings) IsValidateMessageType() bool {
@@ -133,7 +142,7 @@ func (ps *producerSettings) toProtobuf() *v2.Settings {
 	settings := &v2.Settings{
 		ClientType:     &ps.clientType,
 		AccessPoint:    ps.GetAccessPoint(),
-		RequestTimeout: durationpb.New(ps.requestTimeout),
+		RequestTimeout: durationpb.New(ps.GetRequestTimeout()),
 		PubSub:         pubSetting,
 		BackoffPolicy:  ps.GetRetryPolicy(),
 		UserAgent:      globalUserAgent.toProtoBuf(),
@@ -152,17 +161,17 @@ func (ps *producerSettings) applySettingsCommand(settings *v2.Settings) error {
 	}
 	retryPolicy := settings.GetBackoffPolicy()
 	if retryPolicy != nil {
-		ps.retryPolicy.MaxAttempts = retryPolicy.GetMaxAttempts()
+		ps.settingsMu.Lock()
+		next := proto.Clone(ps.retryPolicy).(*v2.RetryPolicy)
+		next.MaxAttempts = retryPolicy.GetMaxAttempts()
 		exponentialBackoff := retryPolicy.GetExponentialBackoff()
 		if exponentialBackoff != nil {
-			ps.retryPolicy.Strategy = &v2.RetryPolicy_ExponentialBackoff{
-				ExponentialBackoff: &v2.ExponentialBackoff{
-					Max:        exponentialBackoff.GetMax(),
-					Initial:    exponentialBackoff.GetInitial(),
-					Multiplier: exponentialBackoff.GetMultiplier(),
-				},
+			next.Strategy = &v2.RetryPolicy_ExponentialBackoff{
+				ExponentialBackoff: proto.Clone(exponentialBackoff).(*v2.ExponentialBackoff),
 			}
 		}
+		ps.retryPolicy = next
+		ps.settingsMu.Unlock()
 	}
 	ps.validateMessageType.Store(v.Publishing.GetValidateMessageType())
 	ps.maxBodySizeBytes.Store(v.Publishing.GetMaxBodySize())
