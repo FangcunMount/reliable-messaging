@@ -104,13 +104,16 @@ def test_only_joint_terminal_states_resolve(operation, branch):
         expected = Decision.COMMIT
     elif operation == branch == State.ABORTED:
         expected = Decision.ROLLBACK
-    assert resolve(ref, Evidence(ref, operation, branch)) == expected
+    assert (
+        resolve(ref, Evidence(reference=ref, execution_state=operation, branch_state=branch))
+        == expected
+    )
     assert resolve(ref, None) == Decision.UNKNOWN
 
 
 def test_every_reference_field_is_bound():
     ref = plans()[0].reference("branch-0", 7, "epoch-a")
-    proof = Evidence(ref, State.COMMITTED, State.COMMITTED)
+    proof = Evidence(reference=ref, execution_state=State.COMMITTED, branch_state=State.COMMITTED)
     for field in dataclasses.fields(ref):
         value = getattr(ref, field.name)
         if isinstance(value, str):
@@ -141,3 +144,21 @@ def test_reject_unreserved_invalid_or_cross_scope_identity():
             plan.reference("branch-0", fence, "epoch")
     with pytest.raises(ValueError):
         plan.reference("missing-branch", 1, "epoch")
+
+
+def test_new_fence_reuses_wire_without_reopening_old_terminal():
+    plan = plans()[0]
+    old = plan.reference("branch-0", 1, "epoch")
+    new = plan.reference("branch-0", 2, "epoch")
+    old_proof = Evidence(reference=old, execution_state=State.ABORTED, branch_state=State.ABORTED)
+    new_proof = Evidence(
+        reference=new, execution_state=State.COMMITTED, branch_state=State.COMMITTED
+    )
+    assert (old.plan_digest, old.wire_hash, old.message_id) == (
+        new.plan_digest,
+        new.wire_hash,
+        new.message_id,
+    )
+    assert resolve(old, old_proof) == Decision.ROLLBACK
+    assert resolve(new, new_proof) == Decision.COMMIT
+    assert resolve(old, new_proof) == resolve(new, old_proof) == Decision.UNKNOWN

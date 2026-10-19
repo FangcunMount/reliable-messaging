@@ -159,7 +159,7 @@ func TestOnlyExactMatchingTerminalEvidenceResolves(t *testing.T) {
 			if operation == Aborted && branch == Aborted {
 				want = Rollback
 			}
-			if got := Resolve(ref, &Evidence{Reference: ref, OperationState: operation, BranchState: branch}); got != want {
+			if got := Resolve(ref, &Evidence{Reference: ref, ExecutionState: operation, BranchState: branch}); got != want {
 				t.Fatalf("%s/%s resolved %s, want %s", operation, branch, got, want)
 			}
 		}
@@ -167,7 +167,7 @@ func TestOnlyExactMatchingTerminalEvidenceResolves(t *testing.T) {
 	if Resolve(ref, nil) != Unknown || Resolve(Reference{}, &Evidence{}) != Unknown {
 		t.Fatal("missing evidence not unknown")
 	}
-	proof := &Evidence{Reference: ref, OperationState: Committed, BranchState: Committed}
+	proof := &Evidence{Reference: ref, ExecutionState: Committed, BranchState: Committed}
 	for i := 0; i < reflect.TypeOf(ref).NumField(); i++ {
 		forged := ref
 		f := reflect.ValueOf(&forged).Elem().Field(i)
@@ -193,5 +193,25 @@ func TestReferenceRejectsUnreservedBranchAndZeroFence(t *testing.T) {
 	}
 	if _, err := plans(t)[0].Reference("branch-0", 0, "epoch"); err == nil {
 		t.Fatal("zero fence accepted")
+	}
+}
+
+func TestNewFenceReusesFrozenIdentityWithoutReopeningOldTerminal(t *testing.T) {
+	p := plans(t)[0]
+	oldRef, err := p.Reference("branch-0", 1, "epoch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newRef, err := p.Reference("branch-0", 2, "epoch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldProof := &Evidence{Reference: oldRef, ExecutionState: Aborted, BranchState: Aborted}
+	newProof := &Evidence{Reference: newRef, ExecutionState: Committed, BranchState: Committed}
+	if oldRef.PlanDigest != newRef.PlanDigest || oldRef.WireHash != newRef.WireHash || oldRef.MessageID != newRef.MessageID {
+		t.Fatal("new fence changed frozen business identity")
+	}
+	if Resolve(oldRef, oldProof) != Rollback || Resolve(newRef, newProof) != Commit || Resolve(oldRef, newProof) != Unknown || Resolve(newRef, oldProof) != Unknown {
+		t.Fatal("execution terminal evidence crossed fences")
 	}
 }

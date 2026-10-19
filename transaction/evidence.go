@@ -51,21 +51,22 @@ func (p FrozenPlan) Reference(branchID string, fence uint64, epoch string) (Refe
 }
 
 // Evidence is read from the authoritative host database, using a fresh read.
-// Both terminal states must have been atomically written under the original
+// ExecutionState is for this exact (operation, fence, writer epoch), not the
+// latest attempt of the root request. Both terminal states must have been atomically written under the original
 // host transaction/fence. Adapter proofs, not this struct, establish that fact.
 type Evidence struct {
 	Reference                   Reference
-	OperationState, BranchState State
+	ExecutionState, BranchState State
 }
 
 func Resolve(ref Reference, evidence *Evidence) Decision {
 	if !ref.Valid() || evidence == nil || evidence.Reference != ref {
 		return Unknown
 	}
-	if evidence.OperationState == Committed && evidence.BranchState == Committed {
+	if evidence.ExecutionState == Committed && evidence.BranchState == Committed {
 		return Commit
 	}
-	if evidence.OperationState == Aborted && evidence.BranchState == Aborted {
+	if evidence.ExecutionState == Aborted && evidence.BranchState == Aborted {
 		return Rollback
 	}
 	// Missing/in-progress/contradictory state is never an abort proof. Lease

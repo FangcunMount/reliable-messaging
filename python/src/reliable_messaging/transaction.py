@@ -176,16 +176,16 @@ class Decision(StrEnum):
 @dataclass(frozen=True)
 class Evidence:
     reference: Reference
-    operation_state: State
+    execution_state: State
     branch_state: State
 
 
 def resolve(reference: Reference, evidence: Evidence | None) -> Decision:
     if not isinstance(reference, Reference) or evidence is None or evidence.reference != reference:
         return Decision.UNKNOWN
-    if evidence.operation_state == State.COMMITTED and evidence.branch_state == State.COMMITTED:
+    if evidence.execution_state == State.COMMITTED and evidence.branch_state == State.COMMITTED:
         return Decision.COMMIT
-    if evidence.operation_state == State.ABORTED and evidence.branch_state == State.ABORTED:
+    if evidence.execution_state == State.ABORTED and evidence.branch_state == State.ABORTED:
         return Decision.ROLLBACK
     # Expired leases/missing/in-progress/contradictory records are not abortion proofs.
     return Decision.UNKNOWN
