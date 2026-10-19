@@ -1,7 +1,10 @@
 GO ?= go
 GOLANGCI_VERSION := v2.5.0
 .PHONY: check docs-check fmt-check test race vet lint integration subscription-integration
-check: docs-check fmt-check vet test race
+check: docs-check fmt-check rocketmq-source-check vet test race
+.PHONY: rocketmq-source-check
+rocketmq-source-check:
+	python3 scripts/check_rocketmq_driver.py
 docs-check:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_check_docs.py
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_docs.py

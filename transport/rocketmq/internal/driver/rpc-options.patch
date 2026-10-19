@@ -1,0 +1,123 @@
+--- a/client.go
++++ b/client.go
+@@ -539,0 +540,6 @@
++func (cli *defaultClient) newClientManager() *defaultClientManager {
++	rpcOptions := append([]RpcClientOption(nil), cli.opts.rpcClientOptions...)
++	rpcOptions = append(rpcOptions, WithRpcClientConnOption(cli.opts.connOptions...), WithRpcClientClientConnFunc(cli.opts.clientConnFunc))
++	return NewDefaultClientManager(rpcOptions...)
++}
++
+@@ -542 +548 @@
+-	cm := NewDefaultClientManager()
++	cm := cli.newClientManager()
+@@ -652 +657,0 @@
+-	cli.done <- struct{}{}
+@@ -653,0 +659,3 @@
++	if manager, ok := cli.clientManager.(*defaultClientManager); ok {
++		manager.shutdown()
++	}
+--- a/client_manager.go
++++ b/client_manager.go
+@@ -88,0 +89 @@
++	rpcOptions         []RpcClientOption
+@@ -93 +94 @@
+-var NewDefaultClientManager = func() *defaultClientManager {
++var NewDefaultClientManager = func(opts ...RpcClientOption) *defaultClientManager {
+@@ -97,0 +99 @@
++		rpcOptions:     append([]RpcClientOption(nil), opts...),
+@@ -175 +176,0 @@
+-	cm.done <- struct{}{}
+@@ -215 +216 @@
+-	rpcClient, err := NewRpcClient(target)
++	rpcClient, err := NewRpcClient(target, cm.rpcOptions...)
+@@ -235 +236,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -246 +248,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -257 +260,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -266,0 +271,19 @@
++// telemetryStream owns the deadline until the stream ends, rather than until
++// Telemetry returns. A unary-style deferred cancel would break the stream.
++type telemetryStream struct {
++	v2.MessagingService_TelemetryClient
++	cancel context.CancelFunc
++}
++
++func (s *telemetryStream) Recv() (*v2.TelemetryCommand, error) {
++	command, err := s.MessagingService_TelemetryClient.Recv()
++	if err != nil {
++		s.cancel()
++	}
++	return command, err
++}
++func (s *telemetryStream) CloseSend() error {
++	err := s.MessagingService_TelemetryClient.CloseSend()
++	s.cancel()
++	return err
++}
+@@ -268,3 +291,4 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
+-	rpcClient, err := cm.getRpcClient(endpoints)
+-	if err != nil {
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	rpcClient, err := cm.getRpcClient(endpoints)
++	if err != nil {
++		cancel()
+@@ -275 +299,5 @@
+-	return ret, err
++	if err != nil {
++		cancel()
++		return nil, err
++	}
++	return &telemetryStream{MessagingService_TelemetryClient: ret, cancel: cancel}, nil
+@@ -279 +307,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -290 +319,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -302 +332,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -323 +354,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -334 +366,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -345 +378,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -356 +390,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+@@ -367 +402,2 @@
+-	ctx, _ = context.WithTimeout(ctx, duration)
++	ctx, cancel := context.WithTimeout(ctx, duration)
++	defer cancel()
+--- a/conn.go
++++ b/conn.go
+@@ -144 +144,3 @@
+-		dctx, _ = context.WithTimeout(c.ctx, c.opts.DialTimeout)
++		var cancel context.CancelFunc
++		dctx, cancel = context.WithTimeout(c.ctx, c.opts.DialTimeout)
++		defer cancel()
+--- a/conn_options.go
++++ b/conn_options.go
+@@ -71 +71 @@
+-	Logger:            zaplog.New(),
++	Logger: zaplog.New(),
