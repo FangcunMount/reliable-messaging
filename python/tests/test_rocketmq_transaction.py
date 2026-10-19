@@ -373,3 +373,20 @@ async def test_explicit_broker_rejection_is_distinct_from_unknown():
     assert error.value.result.branches[0].half == HalfOutcome.REJECTED
     assert calls == 0 and store.state == State.ABORTED
     await sender.close()
+
+
+async def test_callback_error_after_commit_preserves_terminal_evidence_and_error():
+    sender, store, client, execution = fixture()
+    await sender.start()
+
+    async def local(e):
+        store.state = State.COMMITTED
+        raise ConnectionError("synthetic root commit reply lost")
+
+    with pytest.raises(TransactionSendError) as error:
+        await sender.execute(execution, local)
+    assert error.value.code == "local_callback_error_with_terminal_proof"
+    assert error.value.result.local == LocalOutcome.COMMITTED
+    assert error.value.result.branches[0].final == FinalOutcome.COMMIT_CONFIRMED
+    assert sender.stats()["local_errors"] == 1
+    await sender.close()

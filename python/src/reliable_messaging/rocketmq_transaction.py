@@ -118,6 +118,7 @@ class TransactionalSender:
         self._maintenance_stop: asyncio.Event | None = None
         self._check_commit = self._check_rollback = self._check_unknown = 0
         self._invalid_checks = self._database_errors = self._reconciled = 0
+        self._local_errors = 0
 
     def _assert_loop(self) -> None:
         if asyncio.get_running_loop() is not self._loop:
@@ -127,7 +128,7 @@ class TransactionalSender:
         try:
             async with asyncio.timeout(self.config.limits.check_timeout):
                 return await operation
-        except (BindingError, StaleExecutionError):
+        except StaleExecutionError:
             raise
         except Exception:
             self._db_healthy = False
@@ -389,6 +390,7 @@ class TransactionalSender:
         # Invoke once. Cooperative cancellation/lease expiration asks the host
         # UOW to stop, then STILL awaits its actual completion before proof/RPC.
         reported = LocalOutcome.UNKNOWN
+        callback_failed = False
 
         async def run_local() -> LocalOutcome:
             return await local(e)
@@ -405,7 +407,8 @@ class TransactionalSender:
             try:
                 reported = await local_task
             except (Exception, asyncio.CancelledError):
-                pass
+                callback_failed = True
+                self._local_errors += 1
         finally:
             cancel_wait.cancel()
             await asyncio.gather(cancel_wait, return_exceptions=True)
@@ -422,6 +425,8 @@ class TransactionalSender:
             Decision.COMMIT if local_result == LocalOutcome.COMMITTED else Decision.ROLLBACK
         ):
             raise TransactionSendError("final_outcome_unknown", result())
+        if callback_failed:
+            raise TransactionSendError("local_callback_error_with_terminal_proof", result())
         return result()
 
     def _prepare(self, reference: Reference, branch: FrozenBranch) -> tuple[HalfReceipt, Any]:
@@ -535,6 +540,7 @@ class TransactionalSender:
             "running_checks": pool.get("running", 0),
             "check_rejected": pool.get("rejected", 0),
             "callback_errors": pool.get("failed", 0),
+            "local_errors": self._local_errors,
             "check_commit": self._check_commit,
             "check_rollback": self._check_rollback,
             "check_unknown": self._check_unknown,
