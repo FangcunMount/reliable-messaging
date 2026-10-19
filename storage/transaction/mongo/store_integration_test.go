@@ -370,6 +370,12 @@ func TestOriginalMongoTransactionProofs(t *testing.T) {
 		if err := s.RecordHalf(ctx, e, ref, transaction.HalfReceipt{Outcome: transaction.HalfPrepared, BrokerMessageID: "synthetic-broker-id", BrokerTransactionID: "synthetic-broker-tx"}); err != nil {
 			t.Fatal(err)
 		}
+		if err := s.RecordHalf(ctx, e, ref, transaction.HalfReceipt{Outcome: transaction.HalfPrepared, BrokerMessageID: "different-broker-id", BrokerTransactionID: "synthetic-broker-tx"}); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("Broker identity overwritten", err)
+		}
+		if err := s.RecordHalf(ctx, e, ref, transaction.HalfReceipt{Outcome: transaction.HalfUnknown}); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("positive half audit downgraded", err)
+		}
 		assertDecision(t, s, e, transaction.Unknown)
 		if err := s.RecordFinal(ctx, e, ref, transaction.FinalCommitConfirmed, ""); !errors.Is(err, transaction.ErrStaleExecution) {
 			t.Fatal("metadata invented local commit", err)
@@ -379,6 +385,9 @@ func TestOriginalMongoTransactionProofs(t *testing.T) {
 		}
 		if err := s.RecordFinal(ctx, e, ref, transaction.FinalRollbackConfirmed, ""); err != nil {
 			t.Fatal(err)
+		}
+		if err := s.RecordFinal(ctx, e, ref, transaction.FinalUnknown, "late_timeout"); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("positive final audit downgraded", err)
 		}
 		assertDecision(t, s, e, transaction.Rollback)
 		ek := key(e)

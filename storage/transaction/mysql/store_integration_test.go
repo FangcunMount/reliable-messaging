@@ -353,6 +353,12 @@ func TestOriginalTransactionAndReservationProofs(t *testing.T) {
 		if err := s.RecordHalf(ctx, e, ref, h); err != nil {
 			t.Fatal(err)
 		}
+		if err := s.RecordHalf(ctx, e, ref, transaction.HalfReceipt{Outcome: transaction.HalfPrepared, BrokerMessageID: "different-broker-id", BrokerTransactionID: "synthetic-broker-tx"}); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("Broker identity overwritten", err)
+		}
+		if err := s.RecordHalf(ctx, e, ref, transaction.HalfReceipt{Outcome: transaction.HalfUnknown}); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("positive half audit downgraded", err)
+		}
 		assertDecision(t, s, e, transaction.Unknown)
 		if err := s.RecordFinal(ctx, e, ref, transaction.FinalCommitConfirmed, ""); !errors.Is(err, transaction.ErrStaleExecution) {
 			t.Fatal("receipt fabricated local commit proof", err)
@@ -383,6 +389,13 @@ func TestOriginalTransactionAndReservationProofs(t *testing.T) {
 		if brokerID != h.BrokerMessageID || brokerTx != h.BrokerTransactionID || half != string(transaction.HalfPrepared) || final != string(transaction.FinalUnknown) {
 			t.Fatal("receipt identity/outcome lost")
 		}
+		if err := s.RecordFinal(ctx, e, ref, transaction.FinalCommitConfirmed, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordFinal(ctx, e, ref, transaction.FinalUnknown, "late_timeout"); !errors.Is(err, transaction.ErrStaleExecution) {
+			t.Fatal("positive final audit downgraded", err)
+		}
+
 	})
 	t.Run("schema and store identity fail closed", func(t *testing.T) {
 		wrong, err := New(db, transaction.Binding{Owner: "test.mysql", StoreID: "wrong", WriterEpoch: "epoch"})

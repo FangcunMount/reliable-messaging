@@ -47,6 +47,11 @@ func (s *Store) RecordHalf(ctx context.Context, e transaction.Execution, ref tra
 	}
 	filter["state"] = transaction.Prepared
 	filter[prefix+"state"] = transaction.Prepared
+	filter["$and"] = bson.A{
+		bson.M{"$or": bson.A{bson.M{prefix + "half_outcome": bson.M{"$exists": false}}, bson.M{prefix + "half_outcome": bson.M{"$in": bson.A{transaction.HalfNotAttempted, transaction.HalfUnknown, h.Outcome}}}}},
+		bson.M{"$or": bson.A{bson.M{prefix + "broker_message_id": bson.M{"$exists": false}}, bson.M{prefix + "broker_message_id": ""}, bson.M{prefix + "broker_message_id": h.BrokerMessageID}}},
+		bson.M{"$or": bson.A{bson.M{prefix + "broker_transaction_id": bson.M{"$exists": false}}, bson.M{prefix + "broker_transaction_id": ""}, bson.M{prefix + "broker_transaction_id": h.BrokerTransactionID}}},
+	}
 	res, err := s.db.Collection("rm_tx_execution").UpdateOne(ctx, filter, bson.M{"$set": bson.M{prefix + "broker_message_id": h.BrokerMessageID, prefix + "broker_transaction_id": h.BrokerTransactionID, prefix + "half_outcome": h.Outcome, prefix + "half_error_code": h.ErrorCode}, "$currentDate": bson.M{prefix + "half_recorded_at": true}})
 	if err != nil {
 		return err
@@ -77,6 +82,7 @@ func (s *Store) RecordFinal(ctx context.Context, e transaction.Execution, ref tr
 	default:
 		filter["$or"] = bson.A{bson.M{"state": transaction.Committed, prefix + "state": transaction.Committed}, bson.M{"state": transaction.Aborted, prefix + "state": transaction.Aborted}}
 	}
+	filter["$and"] = bson.A{bson.M{"$or": bson.A{bson.M{prefix + "final_outcome": bson.M{"$exists": false}}, bson.M{prefix + "final_outcome": bson.M{"$in": bson.A{transaction.FinalNotAttempted, transaction.FinalUnknown, f}}}}}}
 	res, err := s.db.Collection("rm_tx_execution").UpdateOne(ctx, filter, bson.M{"$set": bson.M{prefix + "final_outcome": f, prefix + "final_error_code": code}, "$currentDate": bson.M{prefix + "final_recorded_at": true}})
 	if err != nil {
 		return err

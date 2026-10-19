@@ -103,7 +103,7 @@ func (s *TransactionalSender) Start(ctx context.Context) error {
 		case <-s.closeDone:
 			return errors.Join(err, s.closeErr)
 		case <-startCtx.Done():
-			return errors.Join(err, transaction.ErrShutdownIncomplete)
+			return errors.Join(err, s.incomplete(startCtx.Err()))
 		}
 	}
 	return nil
@@ -260,7 +260,7 @@ func (s *TransactionalSender) Close(ctx context.Context) error {
 	case <-s.closeDone:
 		return s.closeErr
 	case <-ctx.Done():
-		return errors.Join(transaction.ErrShutdownIncomplete, ctx.Err())
+		return s.incomplete(ctx.Err())
 	}
 }
 func (s *TransactionalSender) Wait(ctx context.Context) error {
@@ -268,7 +268,7 @@ func (s *TransactionalSender) Wait(ctx context.Context) error {
 	case <-s.closeDone:
 		return s.closeErr
 	case <-ctx.Done():
-		return errors.Join(transaction.ErrShutdownIncomplete, ctx.Err())
+		return s.incomplete(ctx.Err())
 	}
 }
 func (s *TransactionalSender) Stats() TransactionStats {
@@ -281,4 +281,12 @@ func (s *TransactionalSender) Stats() TransactionStats {
 	out.Stopped = s.stopped
 	out.Ready = s.started && !s.stopping && s.dbHealthy && out.RunningChecks+out.QueuedChecks < s.config.Limits.CheckWorkers+s.config.Limits.CheckQueue
 	return out
+}
+
+func (s *TransactionalSender) incomplete(cause error) error {
+	stats := s.Stats()
+	if stats.Stopped {
+		return s.closeErr
+	}
+	return &transaction.ShutdownIncomplete{ActiveSends: stats.ActiveSends, RunningChecks: stats.RunningChecks, QueuedChecks: stats.QueuedChecks, RuntimePending: !stats.Stopped, Cause: cause}
 }

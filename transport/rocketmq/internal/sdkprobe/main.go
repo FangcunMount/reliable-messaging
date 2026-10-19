@@ -13,6 +13,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -62,6 +63,10 @@ func run() error {
 	var c config
 	if err = json.Unmarshal(raw, &c); err != nil {
 		return err
+	}
+	host, _, splitErr := net.SplitHostPort(c.Endpoint)
+	if splitErr != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() || (c.Storage != "mysql" && c.Storage != "mongo") || (c.Storage == "mysql" && !strings.Contains(c.DSN, "@tcp(127.0.0.1:")) || (c.Storage == "mongo" && !strings.HasPrefix(c.MongoURI, "mongodb://127.0.0.1:")) {
+		return errors.New("owned loopback fixture required")
 	}
 	ca, err := os.ReadFile(c.CA)
 	if err != nil {
