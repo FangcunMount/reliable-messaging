@@ -245,3 +245,12 @@ MySQL [RequeueConfirmed](../../storage/mysql/requeue.go)提供一个受限原行
 | 原行重排与审计共同提交／回滚 | [MySQL 原行重排测试](../../tests/integration/mysql_requeue_test.go) |
 
 下一段网络与消费者边界见[投递与消费](投递与消费.md)；如何装配原事务与业务回执见[宿主接入边界](../02-接入指南/宿主接入边界.md)。
+
+
+### 显式事务重试与重建计划
+
+事务发送器的 `Retry/Replan`（Python为 `retry/replan`）将宿主提供的 `RetryAuthorization/ReplanAuthorization` 交给有此能力的事务 Store；SDK 与 Checker 不决定业务是否可以重试。Store 仍原子验证精确旧执行已 Aborted、保留旧 fence 并竞争请求记录；Retry复用首次完整计划，Replan要求相同业务输入及显式的新operation。Prepared、Unknown、Committed、缺记录和错身份都不是新执行授权。
+
+这些入口与 Reserve/Execute 共用准入、发送容量、原数据库预算及关闭记账，只返回持久化reservation；不准备半消息，不调用本地执行器或模型。宿主取得新执行后仍须重新检查原业务授权，并显式调用Execute。取消或超时不构成回滚证据，也不会提前释放实际仍在运行的操作容量。只实现基础Store的旧适配继续兼容，但调用这些可选入口会被拒绝。
+
+这是新增源码契约，当前固定Python `0.4.0a1` 和Go事务修订预发布尚不包含这些Sender入口；宿主必须等待相应固定修订发布并重新验收，不能借用工作区源码替代已发布依赖。进度与业务/生产门禁统一维护在[infra M3执行总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)。

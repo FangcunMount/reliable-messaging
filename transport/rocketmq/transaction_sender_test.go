@@ -142,7 +142,7 @@ func transactionFixture(t *testing.T, count int) (transaction.Execution, *transa
 	e := transaction.Execution{Plan: p, Fence: 1, WriterEpoch: "epoch", Token: [32]byte{1}, LeaseUntil: time.Now().Add(time.Minute)}
 	return e, &transactionMemoryStore{e: e, state: transaction.Prepared, halves: map[string]transaction.HalfReceipt{}, finals: map[string]transaction.FinalOutcome{}}
 }
-func transactionRuntime(t *testing.T, store *transactionMemoryStore, backend *transactionFakeBackend, limits transaction.Limits) *TransactionalSender {
+func transactionRuntime(t *testing.T, store transaction.PreparedStore, backend *transactionFakeBackend, limits transaction.Limits) *TransactionalSender {
 	t.Helper()
 	s, err := NewTransactionalSender(TransactionConfig{Endpoint: "127.0.0.1:8081", Owner: "test.mysql", AccessKey: "fixture", SecretKey: "fixture", Limits: limits, Routes: []TransactionRoute{{LogicalTopic: "logical", PhysicalTopic: transactionTestTopic(t), Revision: "v2"}}}, store)
 	if err != nil {

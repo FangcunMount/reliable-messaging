@@ -118,6 +118,14 @@ type Sender interface {
 	Execute(context.Context, Execution, LocalExecutor) (Result, error)
 }
 
+// AuthorizedSender exposes host decisions without teaching a sender or Checker
+// when business may retry. Existing Sender implementations remain unchanged.
+type AuthorizedSender interface {
+	Sender
+	Retry(context.Context, RetryAuthorization) (Reservation, error)
+	Replan(context.Context, ReplanAuthorization) (Reservation, error)
+}
+
 type StoreChecker struct{ Store Store }
 
 func (c StoreChecker) Check(ctx context.Context, ref Reference) Decision {
