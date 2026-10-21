@@ -4,13 +4,22 @@
 
 <!-- source-python-version: 0.4.0a2 -->
 
-## 待发布的显式授权入口修订
+## 显式授权入口修订预发布（2026-10-22）
 
-源码候选Python为`0.4.0a2`，拟与Go `v0.5.0-rocketmq-tx.3`绑定同一最终源码SHA。当前未发布、未创建标签或替换资产。它增加可选Sender Retry/Replan的准入、DB预算和关闭记账，不授权业务重试，不改变事务codec、wire、schema、客户端或原固定制品；源码API评审见[PR48](https://github.com/FangcunMount/reliable-messaging/pull/48)。候选版本在2026-10-22准备时未占用，正式发布前须再次核对。
+[Go v0.5.0-rocketmq-tx.3](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.5.0-rocketmq-tx.3)与[Python 0.4.0a2](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.4.0a2)均绑定源码[`8de893b`](https://github.com/FangcunMount/reliable-messaging/commit/8de893b367cc797580799abd8325f41dd62356db)，源码经PR48/49合并。可选AuthorizedSender的Retry/Replan共享既有准入、数据库预算和真实在途关闭记账；显式业务重试仍由宿主授权。原codec、wire、schema及底层客户端不变，旧版本和资产均保留。
 
-以下“当前”已发布条目继续指向既有制品。最终源码CI、wheel/sdist隔离安装、实际依赖验收、双tag同SHA及下载制品重新安装全部通过后，才登记发布收据；不以本段候选说明代替发布。
+最终源码[Go/race/lint](https://github.com/FangcunMount/reliable-messaging/actions/runs/39671831214)、[Python两档源码与wheel各132](https://github.com/FangcunMount/reliable-messaging/actions/runs/39671831148)、[三档MySQL/Mongo存储各25](https://github.com/FangcunMount/reliable-messaging/actions/runs/39671845590)及[基础设施兼容](https://github.com/FangcunMount/reliable-messaging/actions/runs/39671831227)全部通过，真实依赖矩阵零失败、零跳过。较早候选一次Go依赖代理HTTP/2下载失败已原样重跑成功，原失败记录随Release保留。
 
-## 当前Go修订预发布（2026-10-20）
+两档CI生成的wheel/sdist逐字节一致。下载正式资产并验证摘要后，在隔离Python3.13 wheel、Python3.11 sdist安装环境分别通过104单元测试；各28集成测试的真实依赖验收使用前述最终源码CI，不把本地排除当作执行通过。导入路径均在安装环境，客户端固定5.1.2，无SDK工作区或editable替代。发布Go模块177份选定Go源码/模块文件与固定SHA一致，在模块缓存通过transaction及transport/rocketmq的race，无本地replace。Go module Sum为`h1:25yHjaHAcZYjp96+iNVJyYbdnDPvR6p16J06KeG0sP4=`。
+
+| Python资产 | SHA-256 |
+| --- | --- |
+| wheel | `570822f9ed51eee25001624858d30b7433468eb7da59e34348289c50a37cabb2` |
+| sdist | `50d8baa88296aff035ac1c0978b4660c5c13cca8bfff011431385348c13bc692` |
+
+Release保留初始源码/CI证明与SHA256SUMS，并以不同资产名追加[发布制品安装receipt](https://github.com/FangcunMount/reliable-messaging/releases/download/python/v0.4.0a2/published-installation-receipt.json)、安装测试报告及独立摘要；未替换既有资产或移动tag。宿主须锁定新URL/hash并独立执行接入验收。本次不是M3稳定发布、生产切换或system验收，进度回链[infra执行总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)。
+
+## 历史Go修订预发布（2026-10-20）
 
 [Go v0.5.0-rocketmq-tx.2](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.5.0-rocketmq-tx.2)于2026-10-20 05:33:30（UTC+8）发布，固定源码为[`8fb6fc57`](https://github.com/FangcunMount/reliable-messaging/commit/8fb6fc57a415dc11e27fc64d71722f9675838bc3)，已通过[PR46](https://github.com/FangcunMount/reliable-messaging/pull/46)合并。它修复Apache Go5.1.4私有driver中Broker指标回写替换meter指针与消费ACK hook并发读取的race；公开API、事务codec、wire、schema及预算不变。Python源码未变，继续固定`0.4.0a1`及原`bfaae2b`资产，不重新发布Python。
 
