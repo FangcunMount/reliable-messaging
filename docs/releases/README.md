@@ -2,7 +2,13 @@
 
 本页记录可消费的固定语言版本、源码与发布资产。2026-10-20（UTC+8）新增Go指标并发修订预发布；Python继续使用原固定版本。宿主依赖、部署和业务验收由各宿主另行记录，历史条目保留其采集日期。
 
-<!-- source-python-version: 0.4.0a1 -->
+<!-- source-python-version: 0.4.0a2 -->
+
+## 待发布的显式授权入口修订
+
+源码候选Python为`0.4.0a2`，拟与Go `v0.5.0-rocketmq-tx.3`绑定同一最终源码SHA。当前未发布、未创建标签或替换资产。它增加可选Sender Retry/Replan的准入、DB预算和关闭记账，不授权业务重试，不改变事务codec、wire、schema、客户端或原固定制品；源码API评审见[PR48](https://github.com/FangcunMount/reliable-messaging/pull/48)。候选版本在2026-10-22准备时未占用，正式发布前须再次核对。
+
+以下“当前”已发布条目继续指向既有制品。最终源码CI、wheel/sdist隔离安装、实际依赖验收、双tag同SHA及下载制品重新安装全部通过后，才登记发布收据；不以本段候选说明代替发布。
 
 ## 当前Go修订预发布（2026-10-20）
 
@@ -16,7 +22,7 @@ Release附六个固定资产：两档实际SDK验收报告、Apache补丁manifes
 
 ## M2固定预发布（2026-10-19）
 
-Go与Python事务SDK的两个tag均指向同一合并源码[`bfaae2b`](https://github.com/FangcunMount/reliable-messaging/commit/bfaae2b82ee0d1229b8c965fce472cdf5dec486f)，均为GitHub prerelease。事务入口、原业务事务witness、Checker及关闭契约见[事务SDK接入](../02-接入指南/RocketMQ事务SDK.md)。Python源码版本为0.4.0a1；不从源码版本或标签推断宿主已采用。
+Go与Python事务SDK的两个tag均指向同一合并源码[`bfaae2b`](https://github.com/FangcunMount/reliable-messaging/commit/bfaae2b82ee0d1229b8c965fce472cdf5dec486f)，均为GitHub prerelease。事务入口、原业务事务witness、Checker及关闭契约见[事务SDK接入](../02-接入指南/RocketMQ事务SDK.md)。该M2批次Python源码版本为0.4.0a1；不从源码版本或标签推断宿主已采用。
 
 | 版本 | 固定源码 | 发布时间（UTC+8） | 范围 |
 | --- | --- | --- | --- |
