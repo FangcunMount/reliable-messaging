@@ -40,6 +40,7 @@ type TransactionalSender struct {
 
 var _ transaction.Runtime = (*TransactionalSender)(nil)
 var _ transaction.Sender = (*TransactionalSender)(nil)
+var _ transaction.AuthorizedSender = (*TransactionalSender)(nil)
 
 func NewTransactionalSender(c TransactionConfig, store transaction.PreparedStore) (*TransactionalSender, error) {
 	c, err := validateTransactionConfig(c, store)

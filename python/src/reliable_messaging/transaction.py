@@ -417,6 +417,13 @@ class Sender(Protocol):
     async def execute(self, execution: Execution, local_executor: LocalExecutor) -> Result: ...
 
 
+class AuthorizedSender(Sender, Protocol):
+    """Optional host-authorized advancement; it makes no business retry decision."""
+
+    async def retry(self, authorization: RetryAuthorization) -> Reservation: ...
+    async def replan(self, authorization: ReplanAuthorization) -> Reservation: ...
+
+
 class StoreChecker:
     def __init__(self, store: Store) -> None:
         self.store = store

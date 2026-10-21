@@ -49,3 +49,6 @@ uv build
 构建不授权替换既有制品或升级生产。Go/Python 包、wire、schema、宿主部署为独立边界，见[兼容与升级](../docs/03-维护与验证/兼容与升级.md)。历史 M7 过程与 prerelease 快照留在归档/发布证据层。
 
 RocketMQ 的独立事务入口及原 SQLAlchemy 根事务示例见[事务 SDK](../docs/02-接入指南/RocketMQ事务SDK.md)；Python Mongo 不在本批。
+
+
+事务Sender新增源码入口 `retry(RetryAuthorization)` 和 `replan(ReplanAuthorization)`；它们仅包装宿主的显式授权，共用既有准入、数据库预算、在途任务与关闭流程。事务Store仍负责精确旧Aborted证明和新fence的原子CAS。入口不发送半消息、不调用业务或模型；不能将它们当作自动重试循环。当前固定0.4.0a1制品不含该新增接口，须等待固定修订发布后接入；详见[事务责任](../docs/01-核心设计/事务与Outbox.md#显式事务重试与重建计划)。

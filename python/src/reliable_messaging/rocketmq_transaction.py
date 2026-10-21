@@ -7,11 +7,13 @@ from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar, cast
 
 from reliable_messaging._rocketmq_transaction_driver import RecoveryPool, create_producer
 from reliable_messaging.rocketmq import _require_server_settings
 from reliable_messaging.transaction import (
+    MAX_FENCE,
+    AuthorizedStore,
     Binding,
     BindingError,
     BranchResult,
@@ -27,9 +29,11 @@ from reliable_messaging.transaction import (
     LocalExecutor,
     LocalOutcome,
     Reference,
+    ReplanAuthorization,
     Request,
     Reservation,
     Result,
+    RetryAuthorization,
     ShutdownIncompleteError,
     StaleExecutionError,
     Store,
@@ -296,6 +300,45 @@ class TransactionalSender:
                 self._database(
                     self.store.reserve(request, candidate, lease_seconds=self.config.limits.lease)
                 )
+            )
+        )
+
+    def _validate_previous(self, previous: Execution) -> None:
+        self._validate_plan(previous.plan)
+        if previous.fence >= MAX_FENCE:
+            raise ValueError("previous transaction fence cannot advance")
+
+    def _authorized_store(self) -> AuthorizedStore:
+        if not all(callable(getattr(self.store, name, None)) for name in ("retry", "replan")):
+            raise BindingError("host-authorized transaction store required")
+        return cast(AuthorizedStore, self.store)
+
+    async def retry(self, authorization: RetryAuthorization) -> Reservation:
+        """Route a host decision through owned admission; never authorize business."""
+        self._validate_previous(authorization.previous)
+        store = self._authorized_store()
+        await self._admit()
+        return await asyncio.shield(
+            self._own(
+                self._database(store.retry(authorization, lease_seconds=self.config.limits.lease))
+            )
+        )
+
+    async def replan(self, authorization: ReplanAuthorization) -> Reservation:
+        """Only the store's exact aborted CAS can grant the new complete plan."""
+        self._validate_previous(authorization.previous)
+        self._validate_plan(authorization.candidate)
+        plan = authorization.previous.plan
+        Request(plan.owner, plan.scope, plan.idempotency_key, plan.input_hash).match(
+            authorization.candidate
+        )
+        if authorization.candidate.operation_id == plan.operation_id:
+            raise ValueError("explicit new complete plan identity required")
+        store = self._authorized_store()
+        await self._admit()
+        return await asyncio.shield(
+            self._own(
+                self._database(store.replan(authorization, lease_seconds=self.config.limits.lease))
             )
         )
 

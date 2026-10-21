@@ -83,6 +83,67 @@ func (s *TransactionalSender) Reserve(ctx context.Context, request transaction.R
 	s.storeError(err)
 	return r, err
 }
+
+// Retry advances only an explicit host authorization through the same admission
+// and drain accounting as Reserve. It prepares no half and invokes no business.
+// The store must atomically prove the exact previous execution Aborted.
+func (s *TransactionalSender) Retry(ctx context.Context, authorization transaction.RetryAuthorization) (transaction.Reservation, error) {
+	if err := s.validatePrevious(authorization.Previous); err != nil {
+		return transaction.Reservation{}, err
+	}
+	store, ok := s.store.(transaction.AuthorizedStore)
+	if !ok {
+		return transaction.Reservation{}, fmt.Errorf("%w: host-authorized store required", transaction.ErrBinding)
+	}
+	if err := s.admit(ctx); err != nil {
+		return transaction.Reservation{}, err
+	}
+	defer func() { <-s.slots; s.sendWG.Done() }()
+	budget, cancel := context.WithTimeout(ctx, s.config.Limits.CheckTimeout)
+	defer cancel()
+	r, err := store.Retry(budget, authorization, transaction.ReserveOptions{Lease: s.config.Limits.Lease})
+	s.storeError(err)
+	return r, err
+}
+
+// Replan preserves the old execution and accepts a different complete plan only
+// under an explicit host authorization. The store owns its exact terminal CAS;
+// the sender contributes route validation, shared admission and shutdown bounds.
+func (s *TransactionalSender) Replan(ctx context.Context, authorization transaction.ReplanAuthorization) (transaction.Reservation, error) {
+	if err := s.validatePrevious(authorization.Previous); err != nil {
+		return transaction.Reservation{}, err
+	}
+	if err := s.validatePlan(authorization.Candidate); err != nil {
+		return transaction.Reservation{}, err
+	}
+	if err := transaction.RequestFor(authorization.Previous.Plan).Match(authorization.Candidate); err != nil {
+		return transaction.Reservation{}, err
+	}
+	if authorization.Candidate.Input().OperationID == authorization.Previous.Plan.Input().OperationID {
+		return transaction.Reservation{}, transaction.ErrInvalidPlan
+	}
+	store, ok := s.store.(transaction.AuthorizedStore)
+	if !ok {
+		return transaction.Reservation{}, fmt.Errorf("%w: host-authorized store required", transaction.ErrBinding)
+	}
+	if err := s.admit(ctx); err != nil {
+		return transaction.Reservation{}, err
+	}
+	defer func() { <-s.slots; s.sendWG.Done() }()
+	budget, cancel := context.WithTimeout(ctx, s.config.Limits.CheckTimeout)
+	defer cancel()
+	r, err := store.Replan(budget, authorization, transaction.ReserveOptions{Lease: s.config.Limits.Lease})
+	s.storeError(err)
+	return r, err
+}
+
+func (s *TransactionalSender) validatePrevious(previous transaction.Execution) error {
+	if len(previous.References()) == 0 || previous.Fence >= transaction.MaxFence {
+		return transaction.ErrInvalidPlan
+	}
+	return s.validatePlan(previous.Plan)
+}
+
 func (s *TransactionalSender) validatePlan(p transaction.FrozenPlan) error {
 	if !p.Valid() || p.Input().Owner != s.config.Owner || len(p.Input().Branches) > s.config.Limits.Branches {
 		return transaction.ErrInvalidPlan
