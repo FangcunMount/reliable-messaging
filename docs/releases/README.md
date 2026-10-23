@@ -6,7 +6,7 @@
 
 ## Python telemetry 恢复候选（2026-10-23，未发布）
 
-源码版本准备为 `0.4.0a3`，修正仅针对固定 Python 客户端 5.1.2 的存活生产者：成功心跳发现自身 telemetry stream 已结束时，重建该实例的 stream 并同步 settings。复用既有 I/O loop/心跳，不新建 timer/thread，不修改事务 codec、wire、schema 或宿主执行器；Go 本批不重新发布。
+源码版本准备为 `0.4.0a3`，修正仅针对固定 Python 客户端 5.1.2 的存活生产者：收到 OK 或重启丢失 settings 的结构化 40015 心跳响应、且自身 telemetry stream 已结束时，重建该实例的 stream 并同步 settings。401/403 等拒绝不触发重建。复用既有 I/O loop/心跳，不新建 timer/thread，不修改事务 codec、wire、schema 或宿主执行器；Go 本批不重新发布。
 
 [SDK 修正 PR51](https://github.com/FangcunMount/reliable-messaging/pull/51)及隔离原生故障门禁仍在验证，尚未创建此版本 tag 或 Release，也未声明已发布安装、实际宿主或生产验收。固定候选 SHA、完整 CI、wheel/sdist、摘要及重新安装证明必须在发布前齐备；既有 tag/资产不覆盖。进度以 [infra 总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)为准。
 
