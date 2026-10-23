@@ -1,6 +1,6 @@
 # Python reliable-messaging SDK
 
-独立分发包 fangcun-reliable-messaging，导入 reliable_messaging。它是嵌入式 async SDK，借用原事务/资源，不依赖 Go runtime 或宿主仓库。当前源码为 [pyproject.toml](pyproject.toml)的 **0.4.0a2**；制品来源与候选状态见[发布索引](../docs/releases/README.md)，不能从源码版本推断发布或生产采用。
+独立分发包 fangcun-reliable-messaging，导入 reliable_messaging。它是嵌入式 async SDK，借用原事务/资源，不依赖 Go runtime 或宿主仓库。当前源码为 [pyproject.toml](pyproject.toml)的 **0.4.0a3**；制品来源与候选状态见[发布索引](../docs/releases/README.md)，不能从源码版本推断发布或生产采用。
 
 ## 安装
 
@@ -54,4 +54,4 @@ RocketMQ 的独立事务入口及原 SQLAlchemy 根事务示例见[事务 SDK](.
 事务Sender新增源码入口 `retry(RetryAuthorization)` 和 `replan(ReplanAuthorization)`；它们仅包装宿主的显式授权，共用既有准入、数据库预算、在途任务与关闭流程。事务Store仍负责精确旧Aborted证明和新fence的原子CAS。入口不发送半消息、不调用业务或模型；不能将它们当作自动重试循环。当前固定0.4.0a1制品不含该新增接口，须等待固定修订发布后接入；详见[事务责任](../docs/01-核心设计/事务与Outbox.md#显式事务重试与重建计划)。
 
 
-0.4.0a2目前是Sender显式授权入口的源码候选，尚未发布固定制品。SDK API候选评审、实际依赖验证、双语言同SHA标签与制品重新安装门禁完成前，宿主继续使用原已发布依赖；M3稳定0.4.0仍由完整接入后的独立门禁负责。
+0.4.0a3 是存活事务生产者在 Broker 重启后的 telemetry 恢复候选，尚未发布。它复用当前实例的已有心跳和 I/O loop，在收到 OK 或重启丢失 settings 的 40015 响应时，恢复自身已关闭 stream，或向活跃但未注册的 stream 补发 settings；每端点只允许一个真实 settings 写入，关闭时等待它实际结束，不改 codec、wire、schema 或业务执行器。已发布 0.4.0a2 及其资产保留；固定制品与宿主重验通过前，不将源码候选计为生产采用。M3 稳定 0.4.0 仍由独立门禁负责。
