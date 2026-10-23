@@ -466,6 +466,7 @@ func TestOriginalMongoTransactionProofs(t *testing.T) {
 			}
 		}
 	})
+	t.Run("read-only owner protocol observation", func(t *testing.T) { observationProofs(t, db) })
 	t.Run("missing original session and wrong store fail closed", func(t *testing.T) {
 		e := reserve(t, s, "wrong")
 		if _, err := s.Bind(nil, e); !errors.Is(err, transaction.ErrTransactionRequired) {

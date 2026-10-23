@@ -1,0 +1,225 @@
+{
+  "version": 1,
+  "as_of": "2026-10-23T00:00:00Z",
+  "cases": [
+    {
+      "name": "half audit age cannot reset at last unknown final",
+      "state": "committed",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "committed",
+        "half": "prepared",
+        "final": "unknown",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {
+        "confirmation_gap_branches": 1,
+        "oldest_confirmation_observation_age_seconds": 600
+      },
+      "error": false
+    },
+    {
+      "name": "reservation has no known MQ exposure",
+      "state": "prepared",
+      "started": false,
+      "lease": "2026-10-23T00:01:00Z",
+      "expected": {
+        "reserved_executions": 1
+      },
+      "error": false
+    },
+    {
+      "name": "expired preparing is not rollback proof",
+      "state": "prepared",
+      "started": true,
+      "lease": "2026-10-22T23:58:00Z",
+      "expected": {
+        "preparing_executions": 1,
+        "prepared_expiry_age_seconds": 120
+      },
+      "error": false
+    },
+    {
+      "name": "rollback gap without time stays unaged",
+      "state": "aborted",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "aborted",
+        "half": "unknown",
+        "final": "unknown",
+        "half_at": null,
+        "final_at": null
+      },
+      "expected": {
+        "confirmation_gap_branches": 1,
+        "unaged_confirmation_gap_branches": 1
+      },
+      "error": false
+    },
+    {
+      "name": "later unsent or untracked branch stays separate",
+      "state": "aborted",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "aborted",
+        "half": "not_attempted",
+        "final": "unknown",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {
+        "untracked_aborted_branches": 1
+      },
+      "error": false
+    },
+    {
+      "name": "aborted reservation never started",
+      "state": "aborted",
+      "started": false,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "aborted",
+        "half": "not_attempted",
+        "final": "unknown",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {},
+      "error": false
+    },
+    {
+      "name": "positive rejection has no confirmation gap",
+      "state": "aborted",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "aborted",
+        "half": "rejected",
+        "final": "unknown",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {},
+      "error": false
+    },
+    {
+      "name": "positive commit audit closes gap",
+      "state": "committed",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "committed",
+        "half": "prepared",
+        "final": "commit_confirmed",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {},
+      "error": false
+    },
+    {
+      "name": "positive rollback audit closes gap",
+      "state": "aborted",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "aborted",
+        "half": "prepared",
+        "final": "rollback_confirmed",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {},
+      "error": false
+    },
+    {
+      "name": "committed with no half audit is observation deficiency",
+      "state": "committed",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "committed",
+        "half": "not_attempted",
+        "final": "unknown",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {
+        "unobserved_committed_branches": 1
+      },
+      "error": false
+    },
+    {
+      "name": "contradictory terminal witness is visible",
+      "state": "committed",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "aborted",
+        "half": "prepared",
+        "final": "unknown",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {
+        "metadata_conflicts": 1,
+        "confirmation_gap_branches": 1,
+        "oldest_confirmation_observation_age_seconds": 600
+      },
+      "error": false
+    },
+    {
+      "name": "positive final contradicting root is conflict",
+      "state": "committed",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "committed",
+        "half": "prepared",
+        "final": "rollback_confirmed",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {
+        "metadata_conflicts": 1
+      },
+      "error": false
+    },
+    {
+      "name": "unknown enum makes snapshot unavailable",
+      "state": "committed",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "committed",
+        "half": "invented",
+        "final": "unknown",
+        "half_at": "2026-10-22T23:50:00Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {},
+      "error": true
+    },
+    {
+      "name": "database clock age never negative",
+      "state": "committed",
+      "started": true,
+      "lease": "2026-10-23T00:01:00Z",
+      "branch": {
+        "state": "committed",
+        "half": "prepared",
+        "final": "unknown",
+        "half_at": "2026-10-23T00:00:01Z",
+        "final_at": "2026-10-22T23:59:59Z"
+      },
+      "expected": {
+        "confirmation_gap_branches": 1
+      },
+      "error": false
+    }
+  ]
+}

@@ -481,6 +481,7 @@ func TestOriginalTransactionAndReservationProofs(t *testing.T) {
 			}
 		}
 	})
+	t.Run("read-only owner protocol observation", func(t *testing.T) { observationProofs(t, db) })
 	t.Run("schema and store identity fail closed", func(t *testing.T) {
 		wrong, err := New(db, transaction.Binding{Owner: "test.mysql", StoreID: "wrong", WriterEpoch: "epoch"})
 		if err != nil {

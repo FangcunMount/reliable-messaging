@@ -20,3 +20,9 @@ go test ./tests/compatibility
 Python 在 `python/` 下运行 `uv run --locked --extra nsq pytest tests/test_contracts.py`，直接读上述向量，并调用 Go 公开 API 验证扩展输入。算法相同不证明宿主已采用、历史行已迁移或 MQ/业务已确认。
 
 不要重新排版 payload 或重算摘要来掩盖兼容变化。变更需核对两端 codec、固定向量、原持久字节与[兼容与升级](../docs/03-维护与验证/兼容与升级.md)。历史形成过程保留在归档层，不作为接入前置。
+
+`transaction-observation-v1.json` fixes metadata-observation meanings across Go
+and Python: confirmation observation debt is distinct from Broker pending work,
+unsent/untracked branches and consumer receipts. It is a test vector, not a change
+to the transaction wire codec or schema. Adapter/native and host protection gates
+remain separate.
