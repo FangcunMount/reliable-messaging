@@ -1,24 +1,44 @@
 # 版本与发布索引
 
-本页记录可消费的固定语言版本、源码与发布资产。最新源码正在准备T24协议观察预发布；已发布制品与候选分别记录。宿主依赖、部署和业务验收由各宿主另行记录，历史条目保留其采集日期。
+本页记录可消费的固定语言版本、源码与发布资产。2026-10-23新增T24协议观察固定预发布；已发布制品、宿主采用与生产验收分别记录。宿主依赖、部署和业务验收由各宿主另行记录，历史条目保留其采集日期。
 
 <!-- source-python-version: 0.4.0a4 -->
 
-## T24 回查审计与协议观察候选（2026-10-23）
+## T24 回查审计与协议观察预发布（2026-10-23）
 
-拟发布 Go `v0.5.0-rocketmq-tx.4` 与 Python `0.4.0a4`（tag `python/v0.4.0a4`），
-两者绑定同一冻结源码。版本名已核验未占用；目前尚未创建tag或发布资产。候选加入
-[PR54](https://github.com/FangcunMount/reliable-messaging/pull/54)的成功回查RPC审计，
-以及[PR55](https://github.com/FangcunMount/reliable-messaging/pull/55)的只读协议观察：
-区分确认观察缺口、未跟踪中止分支及lease到期年龄，不将它们当作实际Broker积压或
-消费者receipt，不改变codec/schema/wire或业务执行器。
+已发布 [Go `v0.5.0-rocketmq-tx.4`](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.5.0-rocketmq-tx.4)
+和 [Python `0.4.0a4`](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.4.0a4)，
+两个tag固定同一源码 [`04757bd3212ca961d8eaec22ecd3560101111e18`](https://github.com/FangcunMount/reliable-messaging/commit/04757bd3212ca961d8eaec22ecd3560101111e18)。
+[PR56](https://github.com/FangcunMount/reliable-messaging/pull/56)合并main `5a78dace`，完整tree与候选一致。
+这是M3宿主接入所需的固定预发布，稳定版T27与生产切换仍未执行。
 
-已有组件证明为Go三档MySQL/Mongo各29项、Python两档源码与wheel各145项；
-持续Broker门禁两档各41项（其中10项真实跨实例正向RPC审计）。候选固定SHA仍须取得
-自身完整源码/真实存储及独立wheel门禁；发布与发布后下载、摘要及安装验收分别记录。
-存储报告清单同时覆盖内部元数据分类器；旧组件报告仍保持原始来源。宿主指标和准入
-保护尚未接入；稳定发布、生产、system与48h观察不由本预发布替代。进度见
-[infra唯一总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)。
+包含[PR54](https://github.com/FangcunMount/reliable-messaging/pull/54)的成功回查RPC审计和
+[PR55](https://github.com/FangcunMount/reliable-messaging/pull/55)的只读协议观察；区分确认观察缺口、
+未跟踪中止分支、缺时间证据和lease到期年龄，不将这些值称为实际Broker积压或消费者receipt。
+不改变codec/schema/首次wire，不重复执行业务，不在构造时启动网络/后台任务或执行DDL。
+
+精确候选15项源码检查通过，Go三档MySQL/Mongo各29项，Python两档源码和独立wheel各145项。
+[真实回查](https://github.com/FangcunMount/infra/actions/runs/39928107504)两档各41项，
+[完整故障与有限窗口](https://github.com/FangcunMount/infra/actions/runs/39929965211)两档各48项，
+必需测试非空、零失败/跳过，所属清理通过；完整profile未选择的独立native-index-audit job为N/A。
+实际Broker参数与有限超限证据随验收摘要保存，参数乘积不是恢复SLA。
+
+每个Release附9项资产：6项初始wheel/sdist/锁文件/验收/receipt/摘要，以及3项发布后安装证明。
+18项资产均重新下载并核对服务器digest；原资产ID保持不变，没有覆盖资产或移动tag。
+Go模块233个文件与固定源码匹配，模块缓存中的transaction/rocketmq纯race通过，无local replace。
+wheel/sdist分别从隔离site-packages导入、依赖符合固定uv.lock，各114纯测试通过；31项真实依赖在
+本地明确排除，真实验收使用上述CI，不把排除当作执行或跳过通过。首次默认代理安装在Go解析阶段失败，
+单次指定官方代理重试通过；未证明更细网络根因，未改全局配置，失败历史保留。
+
+| 固定制品 | SHA256 / Go module sum |
+| --- | --- |
+| wheel | `d2aa5fee9979dee43f9e5151026400bf730bf03ab29e7d0ba29536f3c6d4d471` |
+| sdist | `689374346dd7c91255a2018eb26d31af80d15995fe7ab30634080f0ef4311f3b` |
+| Go module | `h1:PflI1oWRjU4RFKvpi8WE/8ICI/1IUp8q8EOsbW1DXCI=` |
+
+详见[发布与安装证明](transaction-observation-release-proof.json)。宿主指标/保护接入仍独立推进；
+本预发布不代表三库源码已合并、生产部署、system或48h验收。唯一进度见
+[infra M3总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)。
 
 ## Python telemetry 恢复预发布（2026-10-23）
 

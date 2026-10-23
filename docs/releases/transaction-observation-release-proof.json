@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "publication": {
+    "version": 1,
+    "source_sha": "04757bd3212ca961d8eaec22ecd3560101111e18",
+    "go_tag": "v0.5.0-rocketmq-tx.4",
+    "python_tag": "python/v0.4.0a4",
+    "post_publication_installation_verified": true,
+    "go_module": {
+      "Path": "github.com/FangcunMount/reliable-messaging",
+      "Version": "v0.5.0-rocketmq-tx.4",
+      "Sum": "h1:PflI1oWRjU4RFKvpi8WE/8ICI/1IUp8q8EOsbW1DXCI=",
+      "GoModSum": "h1:GPiWG8ZsX4pvIZ6QyvLnBVO5iCqNhvsnKwFcg0ftC7I="
+    },
+    "go_verified_files": 233,
+    "go_probe_binary_sha256": "2a996629d07f8114c6d05f0599646673ffb1550058a66a419c259d45f1cf9edd",
+    "languages": {
+      "python": [
+        {
+          "kind": "wheel",
+          "python": "3.11.3",
+          "passed": 114,
+          "failed": 0,
+          "skipped": 0,
+          "integration_deselected": 31,
+          "raw_report_sha256": "877883842cd5c405a24bc5bc0faf2fb948accb15bcd00edd4309e4de1cbfedf9",
+          "package_version": "0.4.0a4",
+          "client_version": "5.1.2",
+          "verified_package_files": 19
+        },
+        {
+          "kind": "sdist",
+          "python": "3.11.3",
+          "passed": 114,
+          "failed": 0,
+          "skipped": 0,
+          "integration_deselected": 31,
+          "raw_report_sha256": "314e0fc458d16032c695fb3f8f6445957f3801d6a9a9adcac8d4086c73b8d53e",
+          "package_version": "0.4.0a4",
+          "client_version": "5.1.2",
+          "verified_package_files": 19
+        }
+      ],
+      "go": {
+        "source": "published tag module cache",
+        "local_replace": false,
+        "pure_race_passed": true
+      }
+    },
+    "installed_dependency_versions": {
+      "wheel": {
+        "opentelemetry-sdk": "1.45.1",
+        "asyncmy": "0.2.15",
+        "greenlet": "3.5.6",
+        "protobuf": "7.36.2",
+        "requests": "2.34.2",
+        "tornado": "6.5.10",
+        "opentelemetry-proto": "1.45.1",
+        "opentelemetry-api": "1.45.1",
+        "grpcio-tools": "1.84.0",
+        "pynsq": "0.9.1",
+        "opentelemetry-exporter-otlp-proto-grpc": "1.45.1",
+        "grpcio": "1.84.0",
+        "jwcrypto": "1.6.1",
+        "googleapis-common-protos": "1.75.5",
+        "setuptools": "84.0.0",
+        "cryptography": "49.0.0",
+        "urllib3": "2.8.0",
+        "pycparser": "3.0",
+        "cffi": "2.1.1",
+        "certifi": "2026.7.22",
+        "opentelemetry-exporter-http-transport": "0.66b1",
+        "opentelemetry-semantic-conventions": "0.66b1",
+        "opentelemetry-exporter-otlp-proto-http": "1.45.1",
+        "opentelemetry-exporter-otlp-common": "0.66b1",
+        "sqlalchemy": "2.0.54",
+        "rocketmq-python-client": "5.1.2",
+        "typing-extensions": "4.16.0",
+        "opentelemetry-exporter-otlp-proto-common": "1.45.1",
+        "fangcun-reliable-messaging": "0.4.0a4",
+        "charset-normalizer": "3.5.2",
+        "opentelemetry-exporter-otlp": "1.45.1",
+        "idna": "3.20"
+      },
+      "sdist": {
+        "opentelemetry-sdk": "1.45.1",
+        "asyncmy": "0.2.15",
+        "greenlet": "3.5.6",
+        "protobuf": "7.36.2",
+        "requests": "2.34.2",
+        "tornado": "6.5.10",
+        "opentelemetry-proto": "1.45.1",
+        "opentelemetry-api": "1.45.1",
+        "grpcio-tools": "1.84.0",
+        "pynsq": "0.9.1",
+        "opentelemetry-exporter-otlp-proto-grpc": "1.45.1",
+        "grpcio": "1.84.0",
+        "jwcrypto": "1.6.1",
+        "googleapis-common-protos": "1.75.5",
+        "setuptools": "84.0.0",
+        "cryptography": "49.0.0",
+        "urllib3": "2.8.0",
+        "pycparser": "3.0",
+        "cffi": "2.1.1",
+        "certifi": "2026.7.22",
+        "opentelemetry-exporter-http-transport": "0.66b1",
+        "opentelemetry-semantic-conventions": "0.66b1",
+        "opentelemetry-exporter-otlp-proto-http": "1.45.1",
+        "opentelemetry-exporter-otlp-common": "0.66b1",
+        "sqlalchemy": "2.0.54",
+        "rocketmq-python-client": "5.1.2",
+        "typing-extensions": "4.16.0",
+        "opentelemetry-exporter-otlp-proto-common": "1.45.1",
+        "fangcun-reliable-messaging": "0.4.0a4",
+        "charset-normalizer": "3.5.2",
+        "opentelemetry-exporter-otlp": "1.45.1",
+        "idna": "3.20"
+      }
+    },
+    "package_source": "isolated site-packages outside SDK workspace",
+    "editable_install": false,
+    "original_assets": {
+      "v0.5.0-rocketmq-tx.4": {
+        "fangcun_reliable_messaging-0.4.0a4-py3-none-any.whl": {
+          "asset_id": 668649413,
+          "sha256": "d2aa5fee9979dee43f9e5151026400bf730bf03ab29e7d0ba29536f3c6d4d471"
+        },
+        "fangcun_reliable_messaging-0.4.0a4.tar.gz": {
+          "asset_id": 668649426,
+          "sha256": "689374346dd7c91255a2018eb26d31af80d15995fe7ab30634080f0ef4311f3b"
+        },
+        "SHA256SUMS": {
+          "asset_id": 668649415,
+          "sha256": "5554853a2fdb43920e221fd2c7ae439c0363a6eb8d207f8fc2327869a5492b34"
+        },
+        "transaction-acceptance.json": {
+          "asset_id": 668649414,
+          "sha256": "619833b1be14e3c77a4d69f1542b8c321eed87182a906ba4dc26ddc5d1cde4b9"
+        },
+        "transaction-release-receipt.json": {
+          "asset_id": 668649411,
+          "sha256": "0273dda27fc936efdcf83baa1868f8180586dd81d4bbc2edbd63abf41415c455"
+        },
+        "uv.lock": {
+          "asset_id": 668649464,
+          "sha256": "71d7911ea5d48b51d6c52a3e01254b970b650afb47d5211aa349accbc59aaf95"
+        }
+      },
+      "python/v0.4.0a4": {
+        "fangcun_reliable_messaging-0.4.0a4-py3-none-any.whl": {
+          "asset_id": 668650479,
+          "sha256": "d2aa5fee9979dee43f9e5151026400bf730bf03ab29e7d0ba29536f3c6d4d471"
+        },
+        "fangcun_reliable_messaging-0.4.0a4.tar.gz": {
+          "asset_id": 668650477,
+          "sha256": "689374346dd7c91255a2018eb26d31af80d15995fe7ab30634080f0ef4311f3b"
+        },
+        "SHA256SUMS": {
+          "asset_id": 668650481,
+          "sha256": "5554853a2fdb43920e221fd2c7ae439c0363a6eb8d207f8fc2327869a5492b34"
+        },
+        "transaction-acceptance.json": {
+          "asset_id": 668650474,
+          "sha256": "619833b1be14e3c77a4d69f1542b8c321eed87182a906ba4dc26ddc5d1cde4b9"
+        },
+        "transaction-release-receipt.json": {
+          "asset_id": 668650475,
+          "sha256": "0273dda27fc936efdcf83baa1868f8180586dd81d4bbc2edbd63abf41415c455"
+        },
+        "uv.lock": {
+          "asset_id": 668650548,
+          "sha256": "71d7911ea5d48b51d6c52a3e01254b970b650afb47d5211aa349accbc59aaf95"
+        }
+      }
+    },
+    "local_installation_record_sha256": "494087e6b4e9027f2584ed8ebc0d56ab27188f65e205f85ffa98d7be4a1e124e",
+    "validation_history": [
+      {
+        "attempt": "default_go_proxy",
+        "result": "failed",
+        "stage": "Go module resolution",
+        "exact_network_cause_proven": false
+      },
+      {
+        "attempt": "official_proxy_command_override",
+        "result": "passed",
+        "global_configuration_changed": false
+      }
+    ],
+    "scope": [
+      "Published artifact provenance, byte identity, locked dependencies and local pure tests",
+      "Real MySQL/Mongo/NSQ/Broker evidence remains in source CI and native profiles",
+      "Host adoption, stable release, production, system and 48-hour observation remain separate"
+    ],
+    "stable": false,
+    "host_adoption": false,
+    "production": false
+  },
+  "final_download": {
+    "source_sha": "04757bd3212ca961d8eaec22ecd3560101111e18",
+    "assets_each": 9,
+    "server_digests": {
+      "v0.5.0-rocketmq-tx.4": {
+        "fangcun_reliable_messaging-0.4.0a4-py3-none-any.whl": "d2aa5fee9979dee43f9e5151026400bf730bf03ab29e7d0ba29536f3c6d4d471",
+        "fangcun_reliable_messaging-0.4.0a4.tar.gz": "689374346dd7c91255a2018eb26d31af80d15995fe7ab30634080f0ef4311f3b",
+        "published-installation-receipt.json": "3ee815b436dc2eb704e68b13678641cdd64b0802816169adafde82c1ecf0a1d9",
+        "PUBLISHED-INSTALLATION-SHA256SUMS": "e6d494262e320ce61ef4f840220b045d10b76936d731670916be5511983b1b6d",
+        "published-pure-unit-summary.json": "e738b72a9d2d5e14651db445e21a3bf10dc5c3afca1b148c5c35fc0f12a41c90",
+        "SHA256SUMS": "5554853a2fdb43920e221fd2c7ae439c0363a6eb8d207f8fc2327869a5492b34",
+        "transaction-acceptance.json": "619833b1be14e3c77a4d69f1542b8c321eed87182a906ba4dc26ddc5d1cde4b9",
+        "transaction-release-receipt.json": "0273dda27fc936efdcf83baa1868f8180586dd81d4bbc2edbd63abf41415c455",
+        "uv.lock": "71d7911ea5d48b51d6c52a3e01254b970b650afb47d5211aa349accbc59aaf95"
+      },
+      "python/v0.4.0a4": {
+        "fangcun_reliable_messaging-0.4.0a4-py3-none-any.whl": "d2aa5fee9979dee43f9e5151026400bf730bf03ab29e7d0ba29536f3c6d4d471",
+        "fangcun_reliable_messaging-0.4.0a4.tar.gz": "689374346dd7c91255a2018eb26d31af80d15995fe7ab30634080f0ef4311f3b",
+        "published-installation-receipt.json": "3ee815b436dc2eb704e68b13678641cdd64b0802816169adafde82c1ecf0a1d9",
+        "PUBLISHED-INSTALLATION-SHA256SUMS": "e6d494262e320ce61ef4f840220b045d10b76936d731670916be5511983b1b6d",
+        "published-pure-unit-summary.json": "e738b72a9d2d5e14651db445e21a3bf10dc5c3afca1b148c5c35fc0f12a41c90",
+        "SHA256SUMS": "5554853a2fdb43920e221fd2c7ae439c0363a6eb8d207f8fc2327869a5492b34",
+        "transaction-acceptance.json": "619833b1be14e3c77a4d69f1542b8c321eed87182a906ba4dc26ddc5d1cde4b9",
+        "transaction-release-receipt.json": "0273dda27fc936efdcf83baa1868f8180586dd81d4bbc2edbd63abf41415c455",
+        "uv.lock": "71d7911ea5d48b51d6c52a3e01254b970b650afb47d5211aa349accbc59aaf95"
+      }
+    },
+    "original_asset_ids_preserved": true,
+    "post_receipt_sha256": "3ee815b436dc2eb704e68b13678641cdd64b0802816169adafde82c1ecf0a1d9",
+    "downloaded_assets_verified": 18
+  }
+}
