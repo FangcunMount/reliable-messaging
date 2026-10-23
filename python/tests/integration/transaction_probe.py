@@ -49,8 +49,9 @@ def emit(event, identity="", decision=""):
 class ObservedStore:
     """Transparent observation of actual public Checker reads, never fake evidence."""
 
-    def __init__(self, store):
+    def __init__(self, store, *, enabled=True):
         self._store = store
+        self.enabled = enabled
 
     def __getattr__(self, name):
         return getattr(self._store, name)
@@ -59,9 +60,11 @@ class ObservedStore:
         try:
             evidence = await self._store.evidence(reference)
         except BaseException:
-            emit("checked_reference", reference.message_id, "unknown")
+            if self.enabled:
+                emit("checked_reference", reference.message_id, "unknown")
             raise
-        emit("checked_reference", reference.message_id, resolve(reference, evidence).value)
+        if self.enabled:
+            emit("checked_reference", reference.message_id, resolve(reference, evidence).value)
         return evidence
 
 
@@ -79,6 +82,7 @@ async def run(args):
     store = MySQLTransactionStore(
         sessions, Binding(config["owner"], "sdk-disposable", "sdk-epoch-1")
     )
+    observed_store = ObservedStore(store, enabled=args.mode == "recover")
     sender = TransactionalSender(
         TransactionConfig(
             config["endpoint"],
@@ -91,7 +95,7 @@ async def run(args):
             ),
             Limits(lease=config.get("lease_millis", 15000) / 1000, reconcile_interval=0.2),
         ),
-        ObservedStore(store) if args.mode == "recover" else store,
+        observed_store if args.mode in ("recover", "fault-live-broker") else store,
     )
     try:
         await sender.start()
@@ -229,6 +233,10 @@ async def run(args):
                     "fault-final": result.local == LocalOutcome.COMMITTED
                     and local_calls == 1
                     and any(b.final == FinalOutcome.UNKNOWN for b in result.branches),
+                    "fault-live-broker": result.local == LocalOutcome.COMMITTED
+                    and local_calls == 1
+                    and all(b.half == HalfOutcome.PREPARED for b in result.branches)
+                    and all(b.final == FinalOutcome.UNKNOWN for b in result.branches),
                     "fault-local-committed": result.local == LocalOutcome.COMMITTED
                     and local_calls == 1,
                     "fault-local-uncommitted": local_calls == 1
@@ -263,6 +271,24 @@ async def run(args):
                 if not valid:
                     raise RuntimeError("expected real fault outcome not established")
                 emit("fault_observed", identity, args.mode)
+                if args.mode == "fault-live-broker":
+                    sender.stop_admission()
+                    async with asyncio.timeout(10):
+                        # No completion event is exposed by the public stats API.
+                        while any(  # noqa: ASYNC110
+                            sender.stats()[key]
+                            for key in (
+                                "pending_calls",
+                                "pending_checks",
+                                "running_checks",
+                                "active_sends",
+                            )
+                        ):
+                            await asyncio.sleep(0.05)
+                    observed_store.enabled = True
+                    emit("live_waiting", identity, "admission_stopped_original_checks_drained")
+                    if (await asyncio.to_thread(sys.stdin.readline)).strip() != "stop":
+                        raise RuntimeError("explicit owned live-recovery stop required")
             else:
                 emit("finalized", identity, result.local)
         await sender.close(grace_seconds=15)
@@ -384,6 +410,7 @@ def main():
             "fault-final",
             "fault-local-committed",
             "fault-local-uncommitted",
+            "fault-live-broker",
         ),
         required=True,
     )
