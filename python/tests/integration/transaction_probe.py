@@ -106,6 +106,19 @@ async def run(args):
             sender = other
             emit("isolated", args.id, "first_closed_second_ready")
         emit("ready", args.id, "public_python_sdk")
+        if args.mode == "fault-live-broker":
+            emit(
+                "live_identity",
+                args.id,
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "client_sha256": hashlib.sha256(
+                            sender._client.client_id.encode()
+                        ).hexdigest(),
+                    }
+                ),
+            )
         if args.mode == "recover":
 
             async def monitor():
@@ -289,6 +302,18 @@ async def run(args):
                     emit("live_waiting", identity, "admission_stopped_original_checks_drained")
                     if (await asyncio.to_thread(sys.stdin.readline)).strip() != "stop":
                         raise RuntimeError("explicit owned live-recovery stop required")
+                    emit(
+                        "live_identity_after",
+                        args.id,
+                        json.dumps(
+                            {
+                                "pid": os.getpid(),
+                                "client_sha256": hashlib.sha256(
+                                    sender._client.client_id.encode()
+                                ).hexdigest(),
+                            }
+                        ),
+                    )
             else:
                 emit("finalized", identity, result.local)
         await sender.close(grace_seconds=15)
