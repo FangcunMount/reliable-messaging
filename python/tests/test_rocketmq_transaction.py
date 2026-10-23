@@ -394,3 +394,63 @@ async def test_callback_error_after_commit_preserves_terminal_evidence_and_error
     assert error.value.result.branches[0].final == FinalOutcome.COMMIT_CONFIRMED
     assert sender.stats()["local_errors"] == 1
     await sender.close()
+
+
+async def test_recovery_confirmation_audit_is_host_loop_only_and_distinct_from_checker():
+    from rocketmq.grpc_protocol import TransactionResolution
+
+    sender, store, client, execution = fixture()
+    calls = []
+
+    async def record(ref, outcome):
+        assert asyncio.get_running_loop() is store.loop
+        calls.append((ref, outcome))
+
+    store.record_recovery_final = record
+    await sender.start()
+    ref = execution.references[0]
+    msg = SimpleNamespace(
+        topic=ref.physical_topic,
+        properties={"rm_tx_ref": encode_reference(ref).decode()},
+        body=b"wire",
+    )
+    try:
+        store.state = State.COMMITTED
+        assert await sender._check(msg) == TransactionResolution.COMMIT
+        assert not calls
+        await sender._recovery_confirmed(msg, int(TransactionResolution.COMMIT))
+        assert calls == [(ref, FinalOutcome.COMMIT_CONFIRMED)]
+        assert sender.stats()["recovery_audit_recorded"] == 1
+        await sender._recovery_confirmed(
+            SimpleNamespace(topic=msg.topic, properties=msg.properties, body=b"different"),
+            int(TransactionResolution.COMMIT),
+        )
+        assert len(calls) == 1 and sender.stats()["recovery_audit_errors"] == 1
+    finally:
+        await sender.close()
+
+
+async def test_recovery_confirmation_audit_failure_never_claims_success():
+    from rocketmq.grpc_protocol import TransactionResolution
+
+    sender, store, client, execution = fixture()
+
+    async def unavailable(ref, outcome):
+        raise OSError("controlled database unavailable")
+
+    store.record_recovery_final = unavailable
+    await sender.start()
+    ref = execution.references[0]
+    msg = SimpleNamespace(
+        topic=ref.physical_topic,
+        properties={"rm_tx_ref": encode_reference(ref).decode()},
+        body=b"wire",
+    )
+    try:
+        await sender._recovery_confirmed(msg, int(TransactionResolution.COMMIT))
+        stats = sender.stats()
+        assert stats["recovery_commit_confirmed"] == 1
+        assert stats["recovery_audit_errors"] == 1 and stats["recovery_audit_recorded"] == 0
+        assert not stats["ready"]
+    finally:
+        await sender.close()

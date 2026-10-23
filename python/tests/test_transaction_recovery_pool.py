@@ -155,3 +155,79 @@ def test_half_rejection_requires_structured_status_not_exception_text():
         assert rejection_code(grpc.aio.AioRpcError(code, (), (), "synthetic")) == expected
     assert rejection_code(TimeoutError()) is None
     assert rejection_code(RuntimeError("PERMISSION_DENIED text is not proof")) is None
+
+
+@pytest.mark.parametrize("resolution,acknowledged", [(1, True), (2, True), (1, False), (0, True)])
+async def test_recovery_audit_follows_rpc_ack_and_retains_actual_worker(resolution, acknowledged):
+    """Pinned dispatch + controlled response; real Broker proof remains separate."""
+    from types import SimpleNamespace
+
+    from rocketmq.grpc_protocol import Code, DigestType, Encoding
+    from rocketmq.grpc_protocol.definition_pb2 import Message
+
+    from reliable_messaging._rocketmq_transaction_driver import create_producer
+
+    loop = asyncio.get_running_loop()
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = []
+    pool = RecoveryPool(1, 0)
+
+    async def checker(message):
+        assert asyncio.get_running_loop() is loop
+        calls.append("decision")
+        return resolution
+
+    async def recovered(message, decision):
+        assert asyncio.get_running_loop() is loop
+        assert calls == ["decision", "rpc"] and decision == resolution
+        calls.append("audit")
+        entered.set()
+        await release.wait()
+
+    producer = create_producer(
+        endpoint="127.0.0.1:1",
+        access_key="fixture",
+        secret_key="fixture",
+        topics={"fixture"},
+        timeout=0.25,
+        host_loop=loop,
+        pool=pool,
+        checker=checker,
+        recovered=recovered,
+    )
+    producer._Client__is_running = True
+
+    def rpc(*args):
+        calls.append("rpc")
+        return SimpleNamespace(
+            status=SimpleNamespace(code=Code.OK if acknowledged else Code.FORBIDDEN)
+        )
+
+    producer.end_transaction = rpc
+    message = Message(body=b"a")
+    message.system_properties.body_encoding = Encoding.IDENTITY
+    message.system_properties.body_digest.type = DigestType.MD5
+    message.system_properties.body_digest.checksum = "0CC175B9C0F1B6A831C399E269772661"
+    try:
+        producer.on_recover_orphaned_transaction_command(None, message, "synthetic-tx")
+        if acknowledged and resolution in (1, 2):
+            async with asyncio.timeout(2):
+                await entered.wait()
+            assert pool.snapshot()["running"] == 1
+            assert not pool.submit(lambda: None)
+            drain = asyncio.create_task(pool.drain())
+            with pytest.raises(TimeoutError):
+                async with asyncio.timeout(0.02):
+                    await asyncio.shield(drain)
+            release.set()
+            await drain
+            assert calls == ["decision", "rpc", "audit"]
+        else:
+            await pool.drain()
+            assert calls == (["decision", "rpc"] if resolution in (1, 2) else ["decision"])
+        assert pool.snapshot()["failed"] == int(not acknowledged and resolution in (1, 2))
+    finally:
+        release.set()
+        await pool.drain()
+        producer._Client__is_running = False
+        await asyncio.to_thread(producer.shutdown)

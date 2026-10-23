@@ -41,6 +41,9 @@ type TransactionChecker struct {
 	// Dispatch must admit BEFORE spawning work. False leaves the Broker's
 	// decision unknown; the adapter owns counters, queue bounds and worker join.
 	Dispatch func(func()) bool
+	// AfterRecovery runs inside the already-admitted worker after the actual
+	// EndTransaction call returns. A decision alone never invokes this hook.
+	AfterRecovery func(*MessageView, TransactionResolution, error)
 }
 
 type ContextTransaction interface {

@@ -53,3 +53,10 @@ nonblocking snapshot and do not wait behind exporter shutdown or creation.
 A deterministic concurrent reset/hook test reproduces the old race; a real TLS
 SimpleConsumer ACK/telemetry test exercises repeated metric-off commands during
 400 actual ACK RPCs. Public APIs, protocol codecs, schemas and budgets are unchanged.
+
+`recovery-receipt.patch` adds an instance-local, optional post-RPC recovery
+observer. It runs only after EndTransaction returns and remains inside the
+already admitted worker, including any bounded protocol-audit database work.
+The read-only Checker decision is not an RPC acknowledgement. Controlled real
+TLS tests separately cover Commit, Rollback, a non-OK response, and lost response;
+they do not substitute for the required real Broker/storage acceptance.

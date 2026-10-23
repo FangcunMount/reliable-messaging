@@ -46,7 +46,8 @@
     "rpc-options.patch",
     "transaction-runtime.patch",
     "settings-snapshot.patch",
-    "meter-snapshot.patch"
+    "meter-snapshot.patch",
+    "recovery-receipt.patch"
   ],
   "patched_sha256": {
     "client.go": "5fcf31e8d9b895cb8fce3f36e1a29b008716b77cafb5427c2ab996a72d598a4b",
@@ -72,7 +73,7 @@
     "metric.go": "26602085dad817668fc61a8dc068d95235a27acc8e464e3c278c678cb4e85aa5",
     "name_resolver.go": "8aaa51e30fdd0cdbe358076eb749ac67cbbc51107a559d729108218498e9fe37",
     "process_queue.go": "6d51d1a8c44a6c575a2c8ad2155b12e95027872a295cd7df822761604c9ef39f",
-    "producer.go": "99f7e6eac95da4b9aaa6208962b8f772deeb575ef524db3631acda2ce6a3bd97",
+    "producer.go": "c612e515ec7bc22ea740ae0ba4274f76a0f14d7377618c63a786bbe8d1752bb5",
     "producer_options.go": "6aca132e75aae5558d3fd455e02909730b64302176f0d34be4e12ec9b2e2da57",
     "publishing_message.go": "b6c06219bae4d0fbc9e961f41d9dd56769d21053b42f6ff1f2629da7c13e3fce",
     "push_consumer.go": "6e44d25c71a71fa0a78a9daeb3be97568d83ab9404450e892eb3710e2d6d6480",
@@ -85,7 +86,7 @@
     "simple_consumer_options.go": "d24c4def53f00b324eb4cea6d498d87e2127f0f65d20ce1e0c48a116aca88f72",
     "simple_thread_pool.go": "f6e3ec76238822539484d9c0c96b3761741d8adf979f6bf46616012dcf42bd64",
     "trace.go": "1a480254170cb1d09533ce00e6e696d6868189e560115d5108a28dd8efb3cdf9",
-    "transaction.go": "aa5efa55f0309bfd5a7eee7be390feabe29efb40949e25b71982e6fc3e750e5b",
+    "transaction.go": "bc94eee19e04793dc994fd52a604aeb5fd84160a4190107f08c4bea9fa781d09",
     "user_agent.go": "74cb4a11296820f6a60c0d390137b40ac1670e57e56825e4cc9d3ca5d616926a"
   }
 }

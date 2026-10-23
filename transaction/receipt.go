@@ -30,6 +30,29 @@ type ReceiptRecorder interface {
 	RecordFinal(context.Context, Execution, Reference, FinalOutcome, string) error
 }
 
+// RecoveryReceiptRecorder records a positive EndTransaction RPC acknowledgement
+// observed during Broker recovery. It grants no execution capability and never
+// changes local witness state. Adapters must verify the exact terminal witness
+// in a fresh, bounded protocol transaction. Missing/contradictory evidence fails.
+//
+// This is optional for existing PreparedStore implementations. An ACK followed by
+// an audit failure remains an observation gap, not proof of Broker pending work.
+type RecoveryReceiptRecorder interface {
+	RecordRecoveryFinal(context.Context, Reference, FinalOutcome) error
+}
+
+// RecoveryFinalState accepts only positively acknowledged terminal outcomes.
+func RecoveryFinalState(f FinalOutcome) (State, error) {
+	switch f {
+	case FinalCommitConfirmed:
+		return Committed, nil
+	case FinalRollbackConfirmed:
+		return Aborted, nil
+	default:
+		return "", ErrInvalidPlan
+	}
+}
+
 // PreparedStore is a Store with explicit startup validation and RPC audit. Its
 // metadata never substitutes for the original-transaction witness decision.
 type PreparedStore interface {

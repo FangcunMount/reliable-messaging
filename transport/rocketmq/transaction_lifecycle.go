@@ -14,6 +14,8 @@ import (
 // TransactionStats has bounded cardinality. It contains no message IDs, tokens,
 // wire, tenant labels or credentials. Hosts export it through their own metrics.
 type TransactionStats struct {
+	RecoveryCommitConfirmed, RecoveryRollbackConfirmed, RecoveryRPCFailed                                              int64
+	RecoveryAuditRecorded, RecoveryAuditErrors, RecoveryAuditUnsupported                                               int64
 	CompletedResults, HalfPreparedResults, HalfRejectedResults, HalfUnknownResults                                     int64
 	LocalCommittedResults, LocalAbortedResults, LocalUnknownResults                                                    int64
 	FinalCommitResults, FinalRollbackResults, FinalUnknownResults                                                      int64
