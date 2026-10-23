@@ -128,7 +128,14 @@ def create_producer(
             except Exception:
                 return  # A failed heartbeat is not authority to reopen a stream.
             response = future.result()
-            if not self.is_running or response is None or response.status.code != Code.OK:
+            # Proxy 5.5.1 loses settings on restart and answers 40015 until
+            # telemetry registers them again. Waiting for OK would deadlock
+            # recovery. Other refusal codes never authorize a rebuild.
+            if (
+                not self.is_running
+                or response is None
+                or response.status.code not in (Code.OK, Code.UNRECOGNIZED_CLIENT_TYPE)
+            ):
                 return
             try:
                 channel = self.rpc_client.retrieve_or_create_channel(endpoints)
