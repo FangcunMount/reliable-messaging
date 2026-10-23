@@ -119,6 +119,30 @@ def create_producer(
                 # then returns early. Still close THIS instance's channels.
                 self.rpc_client.stop()
 
+        def _Client__heartbeat_callback(self, future: Any, endpoints: Any) -> None:
+            # Pinned 5.1.2 leaves a failed telemetry read closed until its
+            # 300-second settings sync. Reuse THIS client's existing heartbeat
+            # and I/O-loop callback: no timer, thread, factory or global patch.
+            try:
+                super()._Client__heartbeat_callback(future, endpoints)
+            except Exception:
+                return  # A failed heartbeat is not authority to reopen a stream.
+            response = future.result()
+            if not self.is_running or response is None or response.status.code != Code.OK:
+                return
+            try:
+                channel = self.rpc_client.retrieve_or_create_channel(endpoints)
+                telemetry = channel.telemetry_stream_stream_call
+                call = getattr(telemetry, "_RpcStreamStreamCall__stream_stream_call", None)
+                if call is not None and call.done() and self.is_running:
+                    # on_new_endpoints also sends settings; merely opening a
+                    # channel cannot register this producer for Broker checks.
+                    self.on_new_endpoints(endpoints)
+            except Exception:
+                from rocketmq.v5.log import logger  # type: ignore[import-untyped]
+
+                logger.warning("Transaction telemetry recovery failed; awaiting next heartbeat")
+
         def _Producer__check_send_retry_condition(
             self,
             message: Any,
