@@ -4,11 +4,15 @@
 
 <!-- source-python-version: 0.4.0a3 -->
 
-## Python telemetry 恢复候选（2026-10-23，未发布）
+## Python telemetry 恢复预发布（2026-10-23）
 
-源码版本准备为 `0.4.0a3`，修正仅针对固定 Python 客户端 5.1.2 的存活生产者：收到 OK 或重启丢失 settings 的结构化 40015 心跳响应时，恢复该实例已关闭的 stream，或在活跃但未注册的 stream 上补发 settings。每端点只允许一个真实 settings 写入，重复请求合并；关闭后不再重建，等待真实在途写入及其 callback 结束。401/403 等拒绝不触发重建。复用既有 I/O loop/心跳，不新建 timer/thread，不修改事务 codec、wire、schema 或宿主执行器；Go 本批不重新发布。
+已发布 [Python `0.4.0a3`](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.4.0a3)，修正仅针对固定 Python 客户端 5.1.2 的存活生产者：收到 OK 或重启丢失 settings 的结构化 40015 心跳响应时，恢复该实例已关闭的 stream，或在活跃但未注册的 stream 上补发 settings。每端点只允许一个真实 settings 写入，重复请求合并；关闭后不再重建，等待真实在途写入及其 callback 结束。401/403 等拒绝不触发重建。复用既有 I/O loop/心跳，不新建 timer/thread，不修改事务 codec、wire、schema 或宿主执行器；Go 本批不重新发布。
 
-[SDK 修正 PR51](https://github.com/FangcunMount/reliable-messaging/pull/51)及隔离原生故障门禁仍在验证，尚未创建此版本 tag 或 Release，也未声明已发布安装、实际宿主或生产验收。固定候选 SHA、完整 CI、wheel/sdist、摘要及重新安装证明必须在发布前齐备；既有 tag/资产不覆盖。进度以 [infra 总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)为准。
+源码固定为 [`2258ad70275ae974e71fb3ffeaa5ed7def4c2893`](https://github.com/FangcunMount/reliable-messaging/commit/2258ad70275ae974e71fb3ffeaa5ed7def4c2893)，经 [PR51](https://github.com/FangcunMount/reliable-messaging/pull/51)／[PR52](https://github.com/FangcunMount/reliable-messaging/pull/52) 合并；合并 main `c7b5a1e` 的完整 tree 与候选一致。两个 PR 各12项源码检查成功。[Python两档源码与独立wheel](https://github.com/FangcunMount/reliable-messaging/actions/runs/39897477622)各134测试，零失败/跳过；[真实Broker故障门禁](https://github.com/FangcunMount/infra/actions/runs/39899882809)两档各5/5，覆盖同一生产者、原根1次、三条精确Reference回查与原wire消费、实际settings/RPC/Checker关闭排空。
+
+Release附9个固定资产。wheel摘要 `7a0a35438ed6890cff37aea3305e1ee1fcec4b9bcac0667959fbc2cda62c636e`，sdist摘要 `096a5f548ca871407f793cc1fbc3158ce649771bb17362375203acc47dfe7d20`。创建Release后全部重新下载，核对服务器digest、SHA256SUMS与原制品逐字节一致；wheel/sdist在独立Python3.11.3环境重新安装，SDK从各自site-packages导入，driver与固定源码一致，未使用editable或SDK工作区导入。详见[发布后验证摘要](python-telemetry-release-proof.json)；发布前receipt和发布后下载证明分别记录，不替换已发布资产。
+
+该版本是 M3 必要修订预发布。既有失败记录保留在 [infra M3 总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)，新制品的实际宿主验收继续独立推进；稳定SDK、生产、system与48h观察尚未完成。未发布PyPI、未改写旧tag，Go本批不重新发布。
 
 ## 显式授权入口修订预发布（2026-10-22）
 

@@ -1,0 +1,41 @@
+{
+  "release_id": 421453556,
+  "release_url": "https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.4.0a3",
+  "published_at": "2026-10-23T04:34:13Z",
+  "tag": "python/v0.4.0a3",
+  "source": "2258ad70275ae974e71fb3ffeaa5ed7def4c2893",
+  "assets": {
+    "fangcun_reliable_messaging-0.4.0a3-py3-none-any.whl": "sha256:7a0a35438ed6890cff37aea3305e1ee1fcec4b9bcac0667959fbc2cda62c636e",
+    "fangcun_reliable_messaging-0.4.0a3.tar.gz": "sha256:096a5f548ca871407f793cc1fbc3158ce649771bb17362375203acc47dfe7d20",
+    "native-recovery-audit.json": "sha256:bfa2d9822d020dcc3fe3bd5361221f4a6afd46196833ce75e1e67a1c57a9f7ac",
+    "python-live-recovery-3.11.json": "sha256:c7a6fe913f3aef7d6675e12a82a403b926964df05deace9bcecef471344885f8",
+    "python-live-recovery-3.13.json": "sha256:e02e80ccb2dcc05f25010e54a9a3a9c658a3d3da6d833c0743a0e9bec5f54912",
+    "python-telemetry-release-receipt.json": "sha256:69b74c208b310d2534e1ed75f01ec2931b7e8d0ccdf604a08fe35a8846addd93",
+    "SHA256SUMS": "sha256:3c846684f31b1455bdc149f6c06d91d50f3867340a80a49db6258239cab70940",
+    "source-and-wheel-audit.json": "sha256:ae1fcebb38fe3d0dceebf931c58e3505a0bda08ff87b8fb24c596297568a1ef9",
+    "uv.lock": "sha256:bd65b5c2193182aa27a3a6db8b0d6a960eac287ce0d139dbaf35ecc92f5f73c8"
+  },
+  "all_server_digests_and_redownloaded_bytes_verified": true,
+  "installed_formats": [
+    {
+      "format": "wheel",
+      "python": "3.11.3",
+      "sdk": "0.4.0a3",
+      "client": "5.1.2",
+      "isolated_site_packages": true,
+      "driver_sha256": "26e3c783521c6dde407adee4dd7b244e5a54b0a0d40787852d9d92818eaaab6d"
+    },
+    {
+      "format": "sdist",
+      "python": "3.11.3",
+      "sdk": "0.4.0a3",
+      "client": "5.1.2",
+      "isolated_site_packages": true,
+      "driver_sha256": "26e3c783521c6dde407adee4dd7b244e5a54b0a0d40787852d9d92818eaaab6d"
+    }
+  ],
+  "source_and_wheel_audit_sha256": "ae1fcebb38fe3d0dceebf931c58e3505a0bda08ff87b8fb24c596297568a1ef9",
+  "native_audit_sha256": "bfa2d9822d020dcc3fe3bd5361221f4a6afd46196833ce75e1e67a1c57a9f7ac",
+  "private_full_publication_proof_sha256": "e698b8f0f51810fe052a2e06c80708b160aabe4b21f72ffca6256042a06c1edd",
+  "scope": "Fixed prerelease and re-downloaded installation only; actual hosts/stable SDK/production/system/48h separate"
+}

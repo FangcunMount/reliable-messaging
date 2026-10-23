@@ -54,4 +54,4 @@ RocketMQ 的独立事务入口及原 SQLAlchemy 根事务示例见[事务 SDK](.
 事务Sender新增源码入口 `retry(RetryAuthorization)` 和 `replan(ReplanAuthorization)`；它们仅包装宿主的显式授权，共用既有准入、数据库预算、在途任务与关闭流程。事务Store仍负责精确旧Aborted证明和新fence的原子CAS。入口不发送半消息、不调用业务或模型；不能将它们当作自动重试循环。当前固定0.4.0a1制品不含该新增接口，须等待固定修订发布后接入；详见[事务责任](../docs/01-核心设计/事务与Outbox.md#显式事务重试与重建计划)。
 
 
-0.4.0a3 是存活事务生产者在 Broker 重启后的 telemetry 恢复候选，尚未发布。它复用当前实例的已有心跳和 I/O loop，在收到 OK 或重启丢失 settings 的 40015 响应时，恢复自身已关闭 stream，或向活跃但未注册的 stream 补发 settings；每端点只允许一个真实 settings 写入，关闭时等待它实际结束，不改 codec、wire、schema 或业务执行器。已发布 0.4.0a2 及其资产保留；固定制品与宿主重验通过前，不将源码候选计为生产采用。M3 稳定 0.4.0 仍由独立门禁负责。
+[0.4.0a3](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.4.0a3) 是已发布的存活事务生产者 telemetry 恢复预发布，源码固定为 `2258ad70275ae974e71fb3ffeaa5ed7def4c2893`。它复用当前实例的已有心跳和 I/O loop，在收到 OK 或重启丢失 settings 的 40015 响应时，恢复自身已关闭 stream，或向活跃但未注册的 stream 补发 settings；每端点只允许一个真实 settings 写入，关闭时等待它实际结束，不改 codec、wire、schema 或业务执行器。已发布 0.4.0a2 及其资产保留；固定制品已完成发布后下载、摘要和隔离安装核验；实际宿主采用新制品与生产验收仍分别记录。M3 稳定 0.4.0 仍由独立门禁负责。
