@@ -60,7 +60,11 @@ async def test_closed_telemetry_recovers_on_healthy_heartbeat_only_on_own_instan
         async def heartbeat(client: SimpleNamespace, code: int = Code.OK) -> None:
             async def invoke() -> None:
                 future: Future[object] = Future()
-                future.set_result(SimpleNamespace(status=SimpleNamespace(code=code)))
+                future.set_result(
+                    SimpleNamespace(
+                        status=SimpleNamespace(code=code, message="synthetic heartbeat")
+                    )
+                )
                 client.producer._Client__heartbeat_callback(future, object())
 
             await asyncio.wrap_future(
@@ -78,11 +82,15 @@ async def test_closed_telemetry_recovers_on_healthy_heartbeat_only_on_own_instan
         assert all(pool.snapshot()["admitted"] == 0 for pool in pools)
 
         first.closed = True
+        await heartbeat(first, Code.UNRECOGNIZED_CLIENT_TYPE)
+        assert first.registrations == 2
+        first.closed = True
         await heartbeat(first, Code.FORBIDDEN)
-        assert first.registrations == 1
+        await heartbeat(first, Code.UNAUTHORIZED)
+        assert first.registrations == 2
         first.producer._Client__is_running = False
         await heartbeat(first)
-        assert first.registrations == 1
+        assert first.registrations == 2
         failure: Future[object] = Future()
         failure.set_exception(ConnectionError("synthetic unavailable heartbeat"))
         second.producer._Client__heartbeat_callback(failure, object())
