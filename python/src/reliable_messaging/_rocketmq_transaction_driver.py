@@ -7,6 +7,7 @@ imports the optional driver and creates its resources only at explicit Start.
 import asyncio
 import math
 import threading
+import time
 from collections.abc import Callable, Coroutine
 from concurrent.futures import Future, ThreadPoolExecutor
 from importlib.metadata import version
@@ -85,6 +86,103 @@ class RecoveryPool:
         self._pool.shutdown(wait=False)
 
 
+class _SettingsSync:
+    """One actual settings write per endpoint; close retains running capacity."""
+
+    def __init__(self, client: Any) -> None:
+        self.client = client
+        self.manager = client._Client__telemetry_manager
+        self.condition = threading.Condition()
+        self.pending: dict[str, Future[Any] | None] = {}
+        self.started: dict[str, float] = {}
+        self.closing = False
+        self.writes = self.failures = self.skipped = 0
+        self.heartbeat_ok = self.heartbeat_missing = self.heartbeat_errors = 0
+        self.last_code = 0
+        self.manager.setting_write = self.write
+
+    def write(self, endpoints: Any) -> None:
+        key = endpoints.facade
+        with self.condition:
+            if self.closing or key in self.pending:
+                self.skipped += 1
+                return
+            self.pending[key] = None
+            self.started[key] = time.monotonic()
+            self.writes += 1
+        try:
+            channel = self.client.rpc_client.channels.get(endpoints)
+            stream = None if channel is None else channel.telemetry_stream_stream_call
+            future = self.client.rpc_client.telemetry_write_async(
+                endpoints, self.client.sync_setting_req(endpoints)
+            )
+        except BaseException:
+            with self.condition:
+                self.pending.pop(key, None)
+                self.started.pop(key, None)
+                self.failures += 1
+                self.condition.notify_all()
+            raise
+        if stream is not None:
+            # A replacement created by upstream's error callback starts empty.
+            # Keep this marker on the stream, not in an ever-growing route map.
+            stream._rm_settings_enqueued = True
+        with self.condition:
+            self.pending[key] = future
+
+        def completed(done: Future[Any]) -> None:
+            # Serialize metadata re-creation with shutdown's admission seal.
+            # The pinned callback only reads an already-completed Future and
+            # may construct a stream; it never waits for a database or RPC.
+            with self.condition:
+                try:
+                    if not self.closing:
+                        self.manager._ClientTelemetryManager__setting_write_callback(
+                            done, endpoints=endpoints
+                        )
+                finally:
+                    if not done.cancelled() and done.exception() is not None:
+                        self.failures += 1
+                    self.pending.pop(key, None)
+                    self.started.pop(key, None)
+                    self.condition.notify_all()
+
+        # A completed Future invokes its callback inline; never hold our lock.
+        future.add_done_callback(completed)
+
+    def busy(self, endpoints: Any, budget: float, call: Any) -> bool:
+        with self.condition:
+            pending = endpoints.facade in self.pending
+            expired = pending and time.monotonic() - self.started[endpoints.facade] >= budget
+        if expired and call is not None:
+            # Cancellation asks the real gRPC write to finish. Its slot remains
+            # owned until the actual Future and original callback have ended.
+            call.cancel()
+        return pending
+
+    def stop(self) -> None:
+        with self.condition:
+            self.closing = True
+
+    def wait(self) -> None:
+        with self.condition:
+            self.condition.wait_for(lambda: not self.pending)
+
+    def snapshot(self) -> dict[str, int | bool]:
+        with self.condition:
+            return dict(
+                pending_settings=len(self.pending),
+                settings_closing=self.closing,
+                settings_writes=self.writes,
+                settings_failures=self.failures,
+                settings_skipped=self.skipped,
+                heartbeat_ok=self.heartbeat_ok,
+                heartbeat_missing=self.heartbeat_missing,
+                heartbeat_errors=self.heartbeat_errors,
+                last_heartbeat_code=self.last_code,
+            )
+
+
 def create_producer(
     *,
     endpoint: str,
@@ -112,12 +210,63 @@ def create_producer(
 
     class BoundedProducer(Producer):  # type: ignore[misc]
         def shutdown(self) -> None:
+            settings = getattr(self, "_rm_settings", None)
+            if settings is not None:
+                settings.stop()
             try:
                 super().shutdown()
             finally:
                 # Upstream startup failure sets is_running=False; its shutdown
                 # then returns early. Still close THIS instance's channels.
                 self.rpc_client.stop()
+                if settings is not None:
+                    settings.wait()
+
+        def _Client__heartbeat_callback(self, future: Any, endpoints: Any) -> None:
+            # Pinned 5.1.2 leaves a failed telemetry read closed until its
+            # 300-second settings sync. Reuse THIS client's existing heartbeat
+            # and I/O-loop callback: no timer, thread, factory or global patch.
+            try:
+                super()._Client__heartbeat_callback(future, endpoints)
+            except Exception:
+                self._rm_settings.heartbeat_errors += 1
+                return  # A failed RPC is not authority to reopen a stream.
+            response = future.result()
+            settings = self._rm_settings
+            if response is not None:
+                code = response.status.code
+                settings.last_code = code if 0 <= code <= 99999 else 0
+                settings.heartbeat_ok += int(code == Code.OK)
+                settings.heartbeat_missing += int(code == Code.UNRECOGNIZED_CLIENT_TYPE)
+            # Proxy 5.5.1 loses settings on restart and answers 40015 until
+            # telemetry registers them again. Waiting for OK would deadlock
+            # recovery. Other refusal codes never authorize a rebuild.
+            if (
+                not self.is_running
+                or settings.closing
+                or response is None
+                or response.status.code not in (Code.OK, Code.UNRECOGNIZED_CLIENT_TYPE)
+            ):
+                return
+            try:
+                channel = self.rpc_client.channels.get(endpoints)
+                telemetry = None if channel is None else channel.telemetry_stream_stream_call
+                call = getattr(telemetry, "_RpcStreamStreamCall__stream_stream_call", None)
+                with settings.condition:
+                    if settings.closing or settings.busy(endpoints, timeout, call):
+                        return
+                    if call is None or call.done():
+                        self.on_new_endpoints(endpoints)
+                    elif response.status.code == Code.UNRECOGNIZED_CLIENT_TYPE or not getattr(
+                        telemetry, "_rm_settings_enqueued", False
+                    ):
+                        # Upstream can open a replacement stream without
+                        # resending settings. Active alone is not registration.
+                        settings.write(endpoints)
+            except Exception:
+                from rocketmq.v5.log import logger  # type: ignore[import-untyped]
+
+                logger.warning("Transaction telemetry recovery failed; awaiting next heartbeat")
 
         def _Producer__check_send_retry_condition(
             self,
@@ -176,6 +325,8 @@ def create_producer(
         checker=object(),
         tls_enable=True,
     )
+
+    producer._rm_settings = _SettingsSync(producer)
 
     # Keep telemetry's integer Duration configuration while imposing the actual
     # configured (possibly fractional) deadline on these instance RPC methods.

@@ -49,8 +49,9 @@ def emit(event, identity="", decision=""):
 class ObservedStore:
     """Transparent observation of actual public Checker reads, never fake evidence."""
 
-    def __init__(self, store):
+    def __init__(self, store, *, enabled=True):
         self._store = store
+        self.enabled = enabled
 
     def __getattr__(self, name):
         return getattr(self._store, name)
@@ -59,10 +60,42 @@ class ObservedStore:
         try:
             evidence = await self._store.evidence(reference)
         except BaseException:
-            emit("checked_reference", reference.message_id, "unknown")
+            if self.enabled:
+                emit("checked_reference", reference.message_id, "unknown")
             raise
-        emit("checked_reference", reference.message_id, resolve(reference, evidence).value)
+        if self.enabled:
+            emit("checked_reference", reference.message_id, resolve(reference, evidence).value)
         return evidence
+
+
+async def live_snapshot(sender):
+    async def read_client():
+        client = sender._client
+        value = client._rm_settings.snapshot()
+        scheduler = getattr(client, "_Client__heartbeat_scheduler", None)
+        thread = getattr(scheduler, "_ClientScheduler__scheduler_thread", None)
+        channels = list(client.rpc_client.channels.values())
+        streams = [
+            getattr(
+                channel.telemetry_stream_stream_call,
+                "_RpcStreamStreamCall__stream_stream_call",
+                None,
+            )
+            for channel in channels
+        ]
+        value.update(
+            client_running=bool(client.is_running),
+            heartbeat_thread_alive=thread is not None and thread.is_alive(),
+            route_endpoints=len(client._Client__route_manager.get_all_endpoints()),
+            channels=len(channels),
+            closed_streams=sum(call is not None and call.done() for call in streams),
+            open_streams=sum(call is not None and not call.done() for call in streams),
+        )
+        return value
+
+    loop = sender._client._rpc_channel_io_loop()
+    value = await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(read_client(), loop))
+    return dict(telemetry=value, sdk=sender.stats())
 
 
 async def run(args):
@@ -79,6 +112,7 @@ async def run(args):
     store = MySQLTransactionStore(
         sessions, Binding(config["owner"], "sdk-disposable", "sdk-epoch-1")
     )
+    observed_store = ObservedStore(store, enabled=args.mode == "recover")
     sender = TransactionalSender(
         TransactionConfig(
             config["endpoint"],
@@ -91,7 +125,7 @@ async def run(args):
             ),
             Limits(lease=config.get("lease_millis", 15000) / 1000, reconcile_interval=0.2),
         ),
-        ObservedStore(store) if args.mode == "recover" else store,
+        observed_store if args.mode in ("recover", "fault-live-broker") else store,
     )
     try:
         await sender.start()
@@ -102,6 +136,19 @@ async def run(args):
             sender = other
             emit("isolated", args.id, "first_closed_second_ready")
         emit("ready", args.id, "public_python_sdk")
+        if args.mode == "fault-live-broker":
+            emit(
+                "live_identity",
+                args.id,
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "client_sha256": hashlib.sha256(
+                            sender._client.client_id.encode()
+                        ).hexdigest(),
+                    }
+                ),
+            )
         if args.mode == "recover":
 
             async def monitor():
@@ -229,6 +276,10 @@ async def run(args):
                     "fault-final": result.local == LocalOutcome.COMMITTED
                     and local_calls == 1
                     and any(b.final == FinalOutcome.UNKNOWN for b in result.branches),
+                    "fault-live-broker": result.local == LocalOutcome.COMMITTED
+                    and local_calls == 1
+                    and all(b.half == HalfOutcome.PREPARED for b in result.branches)
+                    and all(b.final == FinalOutcome.UNKNOWN for b in result.branches),
                     "fault-local-committed": result.local == LocalOutcome.COMMITTED
                     and local_calls == 1,
                     "fault-local-uncommitted": local_calls == 1
@@ -263,6 +314,41 @@ async def run(args):
                 if not valid:
                     raise RuntimeError("expected real fault outcome not established")
                 emit("fault_observed", identity, args.mode)
+                if args.mode == "fault-live-broker":
+                    sender.stop_admission()
+                    async with asyncio.timeout(10):
+                        # No completion event is exposed by the public stats API.
+                        while any(  # noqa: ASYNC110
+                            sender.stats()[key]
+                            for key in (
+                                "pending_calls",
+                                "pending_checks",
+                                "running_checks",
+                                "active_sends",
+                            )
+                        ):
+                            await asyncio.sleep(0.05)
+                    observed_store.enabled = True
+                    emit("live_waiting", identity, "admission_stopped_original_checks_drained")
+                    while True:
+                        command = (await asyncio.to_thread(sys.stdin.readline)).strip()
+                        if command == "stop":
+                            break
+                        if command != "inspect":
+                            raise RuntimeError("explicit owned live-recovery control required")
+                        emit("live_telemetry", args.id, json.dumps(await live_snapshot(sender)))
+                    emit(
+                        "live_identity_after",
+                        args.id,
+                        json.dumps(
+                            {
+                                "pid": os.getpid(),
+                                "client_sha256": hashlib.sha256(
+                                    sender._client.client_id.encode()
+                                ).hexdigest(),
+                            }
+                        ),
+                    )
             else:
                 emit("finalized", identity, result.local)
         await sender.close(grace_seconds=15)
@@ -275,6 +361,8 @@ async def run(args):
         ):
             raise RuntimeError("actual SDK resources remain after close")
         emit("metrics", args.id, json.dumps(stats))
+        if args.mode == "fault-live-broker":
+            emit("live_telemetry_closed", args.id, json.dumps(await live_snapshot(sender)))
         emit("closed", args.id, "drained")
     finally:
         # Never dispose a host pool while SDK resources are still running.
@@ -384,6 +472,7 @@ def main():
             "fault-final",
             "fault-local-committed",
             "fault-local-uncommitted",
+            "fault-live-broker",
         ),
         required=True,
     )
