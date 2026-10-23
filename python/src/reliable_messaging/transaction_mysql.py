@@ -181,6 +181,7 @@ class MySQLTransactionStore:
         key = execution_key(ref.owner, ref.operation_id, ref.writer_epoch, ref.fence)
         branch_id = branch_key(ref.branch_id)
         async with self.sessions() as db, db.begin():
+            await _validate_root(db)
             await self._binding(db, writer=False)
             row = (
                 (

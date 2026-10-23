@@ -326,6 +326,16 @@ async def test_recovery_audit_exact_terminal_reference_without_winner_capability
     else:
         assert await store.abort(execution)
     await store.record_final(execution, ref, FinalOutcome.UNKNOWN, "lost_ack")
+    engine = fixture[0]
+    autocommit_store = MySQLTransactionStore(
+        async_sessionmaker(engine.execution_options(isolation_level="AUTOCOMMIT")), store.binding
+    )
+    with pytest.raises(BindingError, match="AUTOCOMMIT"):
+        await autocommit_store.record_recovery_final(ref, outcome)
+    async with engine.connect() as external:
+        externally_bound = MySQLTransactionStore(async_sessionmaker(external), store.binding)
+        with pytest.raises(BindingError, match="external"):
+            await externally_bound.record_recovery_final(ref, outcome)
     observer = MySQLTransactionStore(sessions, store.binding)
     observed = await observer.lookup(
         Request(
