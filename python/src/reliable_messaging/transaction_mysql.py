@@ -4,6 +4,8 @@ The host supplies primary-only session factories and explicitly installs SCHEMA.
 Constructors perform no I/O. No engine, pool, schema or business transaction is owned.
 """
 
+import asyncio
+import math
 import secrets
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -22,6 +24,7 @@ from reliable_messaging.transaction import (
     Execution,
     FinalOutcome,
     FrozenPlan,
+    HalfOutcome,
     HalfReceipt,
     Reference,
     ReplanAuthorization,
@@ -39,6 +42,7 @@ from reliable_messaging.transaction import (
     execution_key,
     validate_advance,
 )
+from reliable_messaging.transaction_observation import ProtocolObservation, _Accumulator
 
 SCHEMA = files("reliable_messaging").joinpath("transaction_mysql.sql").read_text()
 SCHEMA_VERSION = 1
@@ -162,6 +166,87 @@ class MySQLTransactionStore:
             await db.execute(
                 text(sql), {**values, "key": _key(e), "branch": branch_key(ref.branch_id)}
             )
+
+    async def observe_protocol(self, *, budget_seconds: float = 2.0) -> ProtocolObservation:
+        """Stream one primary read-only statement on a fresh, owned root session.
+
+        Failure or timeout is unavailable, never zero pending. No frozen plan,
+        reference, wire or message identity is selected. No DDL is executed.
+        """
+        if not math.isfinite(budget_seconds) or budget_seconds <= 0:
+            raise ValueError("positive finite observation timeout required")
+        query = files("reliable_messaging").joinpath("transaction_observation.sql").read_text()
+        if query.count("?") != 1:
+            raise ValueError("invalid packaged observation query")
+        accumulator: _Accumulator | None = None
+        async with asyncio.timeout(budget_seconds), self.sessions() as db, db.begin():
+            await _validate_root(db)
+            result = await db.stream(
+                text(query.replace("?", ":owner")), {"owner": self.binding.owner.encode()}
+            )
+            try:
+                async for row in result:
+                    (
+                        store,
+                        epoch,
+                        version,
+                        clock,
+                        ek,
+                        state,
+                        started,
+                        lease,
+                        bk,
+                        branch_state,
+                        half,
+                        final,
+                        half_at,
+                        final_at,
+                        first,
+                    ) = row
+                    if (
+                        _str(store) != self.binding.store_id
+                        or _str(epoch) != self.binding.writer_epoch
+                    ):
+                        raise BindingError("observation writer binding differs")
+                    if version != SCHEMA_VERSION:
+                        raise SchemaError("observation schema differs")
+                    now = datetime.strptime(_str(clock), _CLOCK).replace(tzinfo=UTC)
+                    if accumulator is None:
+                        accumulator = _Accumulator(now)
+                    if ek is None:
+                        continue
+                    if len(ek) != 32 or state is None or started is None or lease is None:
+                        raise ValueError("invalid observation execution metadata")
+                    execution_state = State(_str(state))
+                    if first:
+                        accumulator.execution(
+                            execution_state,
+                            bool(started),
+                            datetime.strptime(_str(lease), _CLOCK).replace(tzinfo=UTC),
+                        )
+                    if bk is None:
+                        accumulator.snapshot.metadata_conflicts += 1
+                        continue
+                    if len(bk) != 32 or branch_state is None or half is None or final is None:
+                        raise ValueError("invalid observation branch metadata")
+                    accumulator.branch(
+                        execution_state,
+                        bool(started),
+                        State(_str(branch_state)),
+                        HalfOutcome(_str(half)),
+                        FinalOutcome(_str(final)),
+                        datetime.strptime(_str(half_at), _CLOCK).replace(tzinfo=UTC)
+                        if half_at is not None
+                        else None,
+                        datetime.strptime(_str(final_at), _CLOCK).replace(tzinfo=UTC)
+                        if final_at is not None
+                        else None,
+                    )
+            finally:
+                await result.close()
+        if accumulator is None:
+            raise BindingError("observation binding missing")
+        return accumulator.snapshot
 
     async def record_recovery_final(self, ref: Reference, outcome: FinalOutcome) -> None:
         """Positive recovery RPC audit, without an execution capability.

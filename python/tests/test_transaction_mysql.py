@@ -403,3 +403,104 @@ async def test_recovery_audit_exact_terminal_reference_without_winner_capability
                 )
             ).scalar_one()
         ).decode() == (State.COMMITTED if committed else State.ABORTED)
+
+
+async def test_read_only_owner_protocol_observation(fixture):
+    from reliable_messaging.transaction import FinalOutcome, HalfOutcome, HalfReceipt, SchemaError
+
+    engine, sessions, _ = fixture
+    binding = Binding("observe.mysql", "observation-store", "epoch")
+    async with engine.begin() as db:
+        await db.execute(
+            text("INSERT INTO rm_tx_binding VALUES(:owner,:store,'epoch',1)"),
+            {"owner": binding.owner.encode(), "store": binding.store_id.encode()},
+        )
+    store = MySQLTransactionStore(sessions, binding)
+    empty = await store.observe_protocol()
+    assert empty.as_of.tzinfo == UTC and empty.confirmation_gap_branches == 0
+
+    async def make_execution(identity):
+        p = plan("observe-" + identity)
+        p = dataclasses.replace(
+            p,
+            owner=binding.owner,
+            branches=p.branches + (dataclasses.replace(p.branches[0], branch_id="second"),),
+        )
+        reservation = await store.reserve(
+            Request(p.owner, p.scope, p.idempotency_key, p.input_hash), p
+        )
+        assert reservation.acquired
+        return reservation.execution
+
+    await make_execution("reserved")
+    preparing = await make_execution("preparing")
+    await store.begin_prepare(preparing)
+    async with engine.begin() as db:
+        await db.execute(
+            text(
+                "UPDATE rm_tx_execution SET lease_until=UTC_TIMESTAMP(6)-INTERVAL 2 MINUTE "
+                "WHERE owner=:owner AND operation_id=:operation"
+            ),
+            {"owner": binding.owner.encode(), "operation": preparing.plan.operation_id.encode()},
+        )
+    gap = await make_execution("gap")
+    await store.begin_prepare(gap)
+    for ref in gap.references:
+        await store.record_half(gap, ref, HalfReceipt(HalfOutcome.UNKNOWN))
+    assert await store.abort(gap)
+    async with engine.begin() as db:
+        await db.execute(
+            text(
+                "UPDATE rm_tx_witness w JOIN rm_tx_execution e USING(execution_key) "
+                "SET w.half_recorded_at=UTC_TIMESTAMP(6)-INTERVAL 10 MINUTE "
+                "WHERE e.owner=:owner AND e.operation_id=:operation"
+            ),
+            {"owner": binding.owner.encode(), "operation": gap.plan.operation_id.encode()},
+        )
+    untracked = await make_execution("untracked")
+    await store.begin_prepare(untracked)
+    assert await store.abort(untracked)
+    committed = await make_execution("committed")
+    async with sessions() as db, db.begin():
+        guard = await store.bind(db, committed)
+        await guard.commit_witness()
+        before = await store.observe_protocol()
+        assert before.unobserved_committed_branches == 0
+    snapshot = await store.observe_protocol()
+    assert snapshot.reserved_executions == snapshot.preparing_executions == 1
+    assert snapshot.prepared_expiry_age_seconds >= 120
+    assert snapshot.confirmation_gap_branches == 2
+    assert snapshot.oldest_confirmation_observation_age_seconds >= 600
+    assert snapshot.untracked_aborted_branches == snapshot.unobserved_committed_branches == 2
+    assert snapshot.metadata_conflicts == snapshot.unaged_confirmation_gap_branches == 0
+    for ref in gap.references:
+        await store.record_recovery_final(ref, FinalOutcome.ROLLBACK_CONFIRMED)
+    snapshot = await store.observe_protocol()
+    assert snapshot.confirmation_gap_branches == 0 and snapshot.untracked_aborted_branches == 2
+    wrong = MySQLTransactionStore(sessions, dataclasses.replace(binding, writer_epoch="wrong"))
+    with pytest.raises(BindingError):
+        await wrong.observe_protocol()
+    for budget in (0, -1, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            await store.observe_protocol(budget_seconds=budget)
+    async with engine.begin() as db:
+        await db.execute(
+            text("UPDATE rm_tx_binding SET schema_version=2 WHERE owner=:owner"),
+            {"owner": binding.owner.encode()},
+        )
+    with pytest.raises(SchemaError):
+        await store.observe_protocol()
+    async with engine.begin() as db:
+        await db.execute(
+            text("UPDATE rm_tx_binding SET schema_version=1 WHERE owner=:owner"),
+            {"owner": binding.owner.encode()},
+        )
+        await db.execute(
+            text(
+                "UPDATE rm_tx_witness w JOIN rm_tx_execution e USING(execution_key) "
+                "SET w.half_outcome='invented' WHERE e.owner=:owner"
+            ),
+            {"owner": binding.owner.encode()},
+        )
+    with pytest.raises(ValueError):
+        await store.observe_protocol()

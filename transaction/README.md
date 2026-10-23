@@ -40,3 +40,30 @@ RPC ACK 与审计数据库提交之间仍存在崩溃/断连窗口；审计失�
 确认。未证实记录代表确认观察缺口，不能断言 Broker 仍有半消息；报警、准入保护和
 具名恢复必须保留该区别。Broker 有限回查结束后，不能依赖再次回查自动补齐缺失审计，
 也不能仅凭消息被某一订阅消费就假定所有订阅完成。
+
+## 持久化观察快照（M3 T24-C，尚未固定发布）
+
+可选 `ObservationReader.ObserveProtocol` / Python `observe_protocol` 借用宿主的
+primary pool，读取配置 owner 的协议元数据；查询不读取 plan、Reference、wire 或
+业务正文，不改变业务/witness、安装 schema、补发消息或启动后台任务。Go 由 context
+提供预算，无 deadline 时默认 2 秒；Python `budget_seconds` 默认 2 秒。数据库错误、
+取消、错误 writer binding/schema 或未知状态使整个采样失败，不能作为零积压。
+MySQL 使用单条非锁定语句并流式归并；Mongo 使用独立只读 snapshot session，
+两次读取共享快照，不借用业务 session，不开启可提交的业务事务。
+
+| 字段 | 含义 |
+|---|---|
+| reserved / preparing executions | Prepared 且尚未/已经开始准备半消息；每个 execution 只计一次 |
+| prepared expiry age | 已开始准备的执行距数据库 lease 到期的时间，不是发送年龄或回滚证明 |
+| confirmation gap branches | 本地终态、有 Prepared/Unknown 半消息审计，但缺少正向最终确认审计 |
+| oldest confirmation observation age | 从 half audit（缺失时 final audit）到数据库当前时间的最大值；是观察到的暴露年龄下界，不能用最近 Unknown final 重置 |
+| unaged confirmation gaps | 缺少审计时间的确认缺口；零年龄不能解释为刚发生 |
+| untracked aborted branches | 已开始准备、已中止但无半消息结果且无正向最终确认；可能未发送，也可能在持久化前丢失确认，不计入已知确认缺口 |
+| unobserved committed branches | 已提交但缺少 Prepared 半消息审计；与正常 Sender 的完整观察不同，需单独诊断 |
+| metadata conflicts | execution/witness 终态或正向最终确认矛盾，或缺少分支元数据 |
+
+快照不是 Broker 当前半消息数量，也不证明订阅或业务 receipt 完成。正向回查审计可
+关闭对应缺口；没有再次回查的 ACK/审计丢失仍需具名处置。历史扫描在预算内流式完成，
+超时丢弃部分结果；不承诺任意数据规模下都能采样。宿主指标、告警与准入保护仍需独立
+接入验收，不能用本接口的存储测试代替。[共用语义向量](../contracts/transaction-observation-v1.json)
+由 Go/Python 同时验证；真实存储仅在隔离 CI 验证。
