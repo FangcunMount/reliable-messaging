@@ -63,6 +63,20 @@ func (s observedStore) Evidence(ctx context.Context, ref transaction.Reference) 
 	return evidence, err
 }
 
+// Forward the optional post-RPC audit through the observation wrapper; never
+// reconstruct a winner capability or derive a decision from these log events.
+func (s observedStore) RecordRecoveryFinal(ctx context.Context, ref transaction.Reference, outcome transaction.FinalOutcome) error {
+	recorder, ok := s.PreparedStore.(transaction.RecoveryReceiptRecorder)
+	if !ok {
+		return errors.New("required disposable recovery audit unsupported")
+	}
+	if err := recorder.RecordRecoveryFinal(ctx, ref, outcome); err != nil {
+		return err
+	}
+	emit("recovery_recorded", ref.MessageID, string(outcome))
+	return nil
+}
+
 func emit(event, id, decision string) {
 	output.Lock()
 	defer output.Unlock()

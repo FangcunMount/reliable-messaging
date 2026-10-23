@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from reliable_messaging.message import Message
@@ -300,3 +301,95 @@ async def test_broker_receipt_audit_cannot_replace_original_transaction_proof(fi
     await store.record_final(e, ref, FinalOutcome.COMMIT_CONFIRMED, "")
     with pytest.raises(StaleExecutionError):
         await store.record_final(e, ref, FinalOutcome.UNKNOWN, "late_timeout")
+
+
+@pytest.mark.parametrize("committed", [True, False])
+async def test_recovery_audit_exact_terminal_reference_without_winner_capability(
+    fixture, committed
+):
+    from reliable_messaging.transaction import FinalOutcome, State, branch_key, execution_key
+
+    _, sessions, store = fixture
+    identity = f"recovery-audit-{committed}"
+    execution = await reserve(store, identity)
+    ref = execution.references[0]
+    with pytest.raises(StaleExecutionError):
+        await store.record_recovery_final(ref, FinalOutcome.COMMIT_CONFIRMED)
+    outcome = FinalOutcome.COMMIT_CONFIRMED if committed else FinalOutcome.ROLLBACK_CONFIRMED
+    if committed:
+        async with sessions() as db, db.begin():
+            guard = await store.bind(db, execution)
+            await db.execute(
+                text("INSERT INTO rm_tx_business_proof VALUES(:id,1)"), {"id": identity}
+            )
+            await guard.commit_witness()
+    else:
+        assert await store.abort(execution)
+    await store.record_final(execution, ref, FinalOutcome.UNKNOWN, "lost_ack")
+    observer = MySQLTransactionStore(sessions, store.binding)
+    observed = await observer.lookup(
+        Request(
+            execution.plan.owner,
+            execution.plan.scope,
+            execution.plan.idempotency_key,
+            execution.plan.input_hash,
+        )
+    )
+    assert not observed.execution.owned
+    await observer.record_recovery_final(ref, outcome)
+    params = {
+        "key": execution_key(ref.owner, ref.operation_id, ref.writer_epoch, ref.fence),
+        "branch": branch_key(ref.branch_id),
+    }
+
+    async def audit():
+        async with sessions() as db:
+            return (
+                await db.execute(
+                    text(
+                        "SELECT final_outcome,final_recorded_at FROM rm_tx_witness "
+                        "WHERE execution_key=:key AND branch_key=:branch"
+                    ),
+                    params,
+                )
+            ).one()
+
+    first = await audit()
+    assert bytes(first[0]).decode() == outcome
+    await observer.record_recovery_final(ref, outcome)
+    assert await audit() == first
+    for bad in (
+        dataclasses.replace(ref, owner="wrong"),
+        dataclasses.replace(ref, fence=ref.fence + 1),
+        dataclasses.replace(ref, wire_hash=b"x" * 32),
+    ):
+        with pytest.raises((BindingError, StaleExecutionError, NoResultFound)):
+            await observer.record_recovery_final(bad, outcome)
+    with pytest.raises(ValueError):
+        await observer.record_recovery_final(ref, FinalOutcome.UNKNOWN)
+    opposite = FinalOutcome.ROLLBACK_CONFIRMED if committed else FinalOutcome.COMMIT_CONFIRMED
+    with pytest.raises(StaleExecutionError):
+        await observer.record_recovery_final(ref, opposite)
+    wrong = MySQLTransactionStore(sessions, Binding(ref.owner, "wrong-store", ref.writer_epoch))
+    with pytest.raises(BindingError):
+        await wrong.record_recovery_final(ref, outcome)
+    with pytest.raises(StaleExecutionError):
+        await store.record_final(execution, ref, FinalOutcome.UNKNOWN, "late_timeout")
+    assert await decision(store, execution) == (Decision.COMMIT if committed else Decision.ROLLBACK)
+    async with sessions() as db:
+        assert (
+            await db.execute(
+                text("SELECT COUNT(*) FROM rm_tx_business_proof WHERE id=:id"), {"id": identity}
+            )
+        ).scalar_one() == int(committed)
+        assert bytes(
+            (
+                await db.execute(
+                    text(
+                        "SELECT state FROM rm_tx_witness "
+                        "WHERE execution_key=:key AND branch_key=:branch"
+                    ),
+                    params,
+                )
+            ).scalar_one()
+        ).decode() == (State.COMMITTED if committed else State.ABORTED)

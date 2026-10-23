@@ -128,6 +128,9 @@ class TransactionalSender:
         self._maintenance: asyncio.Task[None] | None = None
         self._maintenance_stop: asyncio.Event | None = None
         self._check_commit = self._check_rollback = self._check_unknown = 0
+        self._recovery_commit_confirmed = self._recovery_rollback_confirmed = 0
+        self._recovery_audit_recorded = self._recovery_audit_errors = 0
+        self._recovery_audit_unsupported = 0
         self._invalid_checks = self._database_errors = self._reconciled = 0
         self._result_counts = {
             key: 0
@@ -210,6 +213,7 @@ class TransactionalSender:
                 host_loop=self._loop,
                 pool=self._pool,
                 checker=self._check,
+                recovered=self._recovery_confirmed,
             )
             self._client.startup()
             for topic in self._routes:
@@ -544,6 +548,43 @@ class TransactionalSender:
         self._check_unknown += 1
         return int(TransactionResolution.TRANSACTION_RESOLUTION_UNSPECIFIED)
 
+    async def _recovery_confirmed(self, message: Any, resolution: int) -> None:
+        """Called only after the actual recovery EndTransaction response is OK."""
+        from rocketmq.grpc_protocol import TransactionResolution  # type: ignore[import-untyped]
+
+        if resolution == TransactionResolution.COMMIT:
+            outcome = FinalOutcome.COMMIT_CONFIRMED
+            self._recovery_commit_confirmed += 1
+        elif resolution == TransactionResolution.ROLLBACK:
+            outcome = FinalOutcome.ROLLBACK_CONFIRMED
+            self._recovery_rollback_confirmed += 1
+        else:
+            return
+        try:
+            route = self._routes.get(message.topic)
+            ref = decode_reference(message.properties.get(REFERENCE_PROPERTY, "").encode())
+            if (
+                route is None
+                or ref.owner != self.config.owner
+                or ref.physical_topic != message.topic
+                or ref.logical_topic != route.logical_topic
+                or ref.route_revision != route.revision
+                or not message.body
+                or len(message.body) > 262144
+                or hashlib.sha256(message.body).digest() != ref.wire_hash
+            ):
+                raise BindingError("invalid recovery confirmation identity")
+            recorder = getattr(self.store, "record_recovery_final", None)
+            if not callable(recorder):
+                self._recovery_audit_unsupported += 1
+                return
+            await self._database(recorder(ref, outcome))
+        except Exception:
+            self._recovery_audit_errors += 1
+            self._db_healthy = False
+            return
+        self._recovery_audit_recorded += 1
+
     def stop_admission(self) -> None:
         self._stopping = True
         if self._available is not None:
@@ -629,6 +670,11 @@ class TransactionalSender:
             "check_rejected": pool.get("rejected", 0),
             "callback_errors": pool.get("failed", 0),
             "local_errors": self._local_errors,
+            "recovery_commit_confirmed": self._recovery_commit_confirmed,
+            "recovery_rollback_confirmed": self._recovery_rollback_confirmed,
+            "recovery_audit_recorded": self._recovery_audit_recorded,
+            "recovery_audit_errors": self._recovery_audit_errors,
+            "recovery_audit_unsupported": self._recovery_audit_unsupported,
             "check_commit": self._check_commit,
             "check_rollback": self._check_rollback,
             "check_unknown": self._check_unknown,

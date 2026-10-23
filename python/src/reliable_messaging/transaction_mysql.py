@@ -163,6 +163,78 @@ class MySQLTransactionStore:
                 text(sql), {**values, "key": _key(e), "branch": branch_key(ref.branch_id)}
             )
 
+    async def record_recovery_final(self, ref: Reference, outcome: FinalOutcome) -> None:
+        """Positive recovery RPC audit, without an execution capability.
+
+        This fresh protocol transaction cannot commit business or change witness
+        state. The caller must have observed EndTransaction OK for this exact
+        Reference; a Checker decision alone is insufficient.
+        """
+        if outcome == FinalOutcome.COMMIT_CONFIRMED:
+            expected = State.COMMITTED
+        elif outcome == FinalOutcome.ROLLBACK_CONFIRMED:
+            expected = State.ABORTED
+        else:
+            raise ValueError("positive recovery confirmation required")
+        if not isinstance(ref, Reference) or ref.owner != self.binding.owner:
+            raise BindingError("configured recovery owner required")
+        key = execution_key(ref.owner, ref.operation_id, ref.writer_epoch, ref.fence)
+        branch_id = branch_key(ref.branch_id)
+        async with self.sessions() as db, db.begin():
+            await self._binding(db, writer=False)
+            row = (
+                (
+                    await db.execute(
+                        text(
+                            "SELECT owner,operation_id,writer_epoch,fence,state "
+                            "FROM rm_tx_execution "
+                            "WHERE execution_key=:key FOR UPDATE"
+                        ),
+                        {"key": key},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            if (
+                _str(row["owner"]) != ref.owner
+                or _str(row["operation_id"]) != ref.operation_id
+                or _str(row["writer_epoch"]) != ref.writer_epoch
+                or row["fence"] != ref.fence
+                or _str(row["state"]) != expected
+            ):
+                raise StaleExecutionError("recovery execution differs or is not terminal")
+            branch = (
+                (
+                    await db.execute(
+                        text(
+                            "SELECT reference,state,final_outcome FROM rm_tx_witness "
+                            "WHERE execution_key=:key AND branch_key=:branch FOR UPDATE"
+                        ),
+                        {"key": key, "branch": branch_id},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            previous = _str(branch["final_outcome"])
+            if (
+                decode_reference(branch["reference"]) != ref
+                or _str(branch["state"]) != expected
+                or previous not in ("not_attempted", "unknown", outcome)
+            ):
+                raise StaleExecutionError("recovery branch proof differs")
+            if previous == outcome:
+                return  # Preserve the first positive confirmation timestamp.
+            await db.execute(
+                text(
+                    "UPDATE rm_tx_witness SET final_outcome=:outcome,final_error_code='',"
+                    "final_recorded_at=UTC_TIMESTAMP(6) "
+                    "WHERE execution_key=:key AND branch_key=:branch"
+                ),
+                {"outcome": outcome, "key": key, "branch": branch_id},
+            )
+
     async def record_half(self, e: Execution, ref: Reference, receipt: HalfReceipt) -> None:
         await self._receipt(
             e,

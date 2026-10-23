@@ -101,7 +101,7 @@ func (s *TransactionalSender) driverFactory(dispatch func(func()) bool, check fu
 	for _, r := range s.config.Routes {
 		topics = append(topics, r.PhysicalTopic)
 	}
-	inner, err := driver.NewProducer(&driver.Config{Endpoint: s.config.Endpoint, Credentials: &credentials.SessionCredentials{AccessKey: s.config.AccessKey, AccessSecret: s.config.SecretKey}}, driver.WithTopics(topics...), driver.WithMaxAttempts(1), driver.WithTransactionChecker(&driver.TransactionChecker{CheckContext: check, Dispatch: dispatch}), driver.WithClientFunc(func(c *driver.Config, opts ...driver.ClientOption) (driver.Client, error) {
+	inner, err := driver.NewProducer(&driver.Config{Endpoint: s.config.Endpoint, Credentials: &credentials.SessionCredentials{AccessKey: s.config.AccessKey, AccessSecret: s.config.SecretKey}}, driver.WithTopics(topics...), driver.WithMaxAttempts(1), driver.WithTransactionChecker(&driver.TransactionChecker{CheckContext: check, Dispatch: dispatch, AfterRecovery: s.afterRecovery}), driver.WithClientFunc(func(c *driver.Config, opts ...driver.ClientOption) (driver.Client, error) {
 		return driver.NewClient(c, append(opts, driver.WithQueryRouteTimeout(s.config.Limits.RPCTimeout), driver.WithConnOptions(driver.WithTLSConfig(s.config.TLS), driver.WithDialTimeout(s.config.Limits.RPCTimeout)))...)
 	}))
 	if err != nil {

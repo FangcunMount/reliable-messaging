@@ -193,6 +193,7 @@ def create_producer(
     host_loop: asyncio.AbstractEventLoop,
     pool: RecoveryPool,
     checker: Callable[[Any], Coroutine[Any, Any, int]],
+    recovered: Callable[[Any, int], Coroutine[Any, Any, None]] | None = None,
 ) -> Any:
     if version("rocketmq-python-client") != "5.1.2":
         raise RuntimeError("transaction adaptation requires pinned rocketmq-python-client 5.1.2")
@@ -313,6 +314,12 @@ def create_producer(
                 )
                 if response.status.code != Code.OK:
                     raise RuntimeError("transaction backcheck final RPC was not acknowledged")
+                if recovered is not None:
+                    # Keep the real worker slot until fresh HOST-loop audit
+                    # finishes. Never pass an AsyncSession to this thread.
+                    asyncio.run_coroutine_threadsafe(
+                        recovered(message, int(result)), host_loop
+                    ).result()
 
             # Rejection creates no task, coroutine, callback RPC or new thread.
             pool.submit(recover)

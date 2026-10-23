@@ -67,6 +67,11 @@ class ObservedStore:
             emit("checked_reference", reference.message_id, resolve(reference, evidence).value)
         return evidence
 
+    async def record_recovery_final(self, reference, outcome):
+        await self._store.record_recovery_final(reference, outcome)
+        if self.enabled:
+            emit("recovery_recorded", reference.message_id, outcome.value)
+
 
 async def live_snapshot(sender):
     async def read_client():

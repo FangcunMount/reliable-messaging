@@ -399,6 +399,73 @@ func TestOriginalMongoTransactionProofs(t *testing.T) {
 			t.Fatal("audit state lost")
 		}
 	})
+	t.Run("recovery audit preserves exact terminal witnesses and first positive time", func(t *testing.T) {
+		for _, committed := range []bool{true, false} {
+			id := fmt.Sprintf("recovery-audit-%t", committed)
+			e := reserve(t, s, id)
+			ref := e.References()[0]
+			if err := s.RecordRecoveryFinal(ctx, ref, transaction.FinalCommitConfirmed); !errors.Is(err, transaction.ErrStaleExecution) {
+				t.Fatal("prepared audit accepted", err)
+			}
+			outcome := transaction.FinalRollbackConfirmed
+			want := transaction.Rollback
+			if committed {
+				outcome = transaction.FinalCommitConfirmed
+				want = transaction.Commit
+				local(t, db, s, e, id, false)
+			} else if ok, err := s.Abort(ctx, e); err != nil || !ok {
+				t.Fatal(err)
+			}
+			if err := s.RecordFinal(ctx, e, ref, transaction.FinalUnknown, "lost_ack"); err != nil {
+				t.Fatal(err)
+			}
+			observer, err := New(db, s.binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observed, err := observer.Lookup(ctx, transaction.RequestFor(e.Plan))
+			if err != nil || observed.Execution.Token != [32]byte{} {
+				t.Fatal("observer gained capability", err)
+			}
+			if err = observer.RecordRecoveryFinal(ctx, ref, outcome); err != nil {
+				t.Fatal(err)
+			}
+			ek := key(e)
+			var first, second executionDoc
+			if err = db.Collection("rm_tx_execution").FindOne(ctx, bson.M{"_id": ek[:]}).Decode(&first); err != nil || first.Branches[0].Final != outcome {
+				t.Fatal("recovery audit absent", err)
+			}
+			if err = observer.RecordRecoveryFinal(ctx, ref, outcome); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.Collection("rm_tx_execution").FindOne(ctx, bson.M{"_id": ek[:]}).Decode(&second); err != nil || !first.Branches[0].FinalAt.Equal(second.Branches[0].FinalAt) {
+				t.Fatal("first time overwritten", err)
+			}
+			for _, bad := range []transaction.Reference{func() transaction.Reference { r := ref; r.Owner = "other"; return r }(), func() transaction.Reference { r := ref; r.Fence++; return r }(), func() transaction.Reference { r := ref; r.WireHash[0] ^= 1; return r }()} {
+				if err = observer.RecordRecoveryFinal(ctx, bad, outcome); err == nil {
+					t.Fatal("inexact evidence accepted")
+				}
+			}
+			opposite := transaction.FinalCommitConfirmed
+			if committed {
+				opposite = transaction.FinalRollbackConfirmed
+			}
+			if err = observer.RecordRecoveryFinal(ctx, ref, opposite); !errors.Is(err, transaction.ErrStaleExecution) {
+				t.Fatal("contradictory audit accepted", err)
+			}
+			if err = observer.RecordRecoveryFinal(ctx, ref, transaction.FinalUnknown); err == nil {
+				t.Fatal("unknown audit accepted")
+			}
+			if err = s.RecordFinal(ctx, e, ref, transaction.FinalUnknown, "late_timeout"); !errors.Is(err, transaction.ErrStaleExecution) {
+				t.Fatal("positive audit downgraded", err)
+			}
+			assertDecision(t, s, e, want)
+			count, err := db.Collection("tx_business").CountDocuments(ctx, bson.M{"_id": id})
+			if err != nil || count != map[bool]int64{true: 1, false: 0}[committed] {
+				t.Fatal("audit altered business", err)
+			}
+		}
+	})
 	t.Run("missing original session and wrong store fail closed", func(t *testing.T) {
 		e := reserve(t, s, "wrong")
 		if _, err := s.Bind(nil, e); !errors.Is(err, transaction.ErrTransactionRequired) {

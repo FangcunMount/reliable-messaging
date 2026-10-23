@@ -523,6 +523,9 @@ func (p *defaultProducer) onRecoverOrphanedTransactionCommand(endpoints *v2.Endp
 		if err != nil {
 			p.cli.log.Errorf("exception raised while ending the transaction, messageId=%s, transactionId=%s, endpoints=%v, err=%w", messageId, transactionId, endpoints, err)
 		}
+		if p.checker.AfterRecovery != nil {
+			p.checker.AfterRecovery(messageView, resolution, err)
+		}
 	}
 	if p.checker.Dispatch != nil {
 		p.checker.Dispatch(work)

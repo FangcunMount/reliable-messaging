@@ -397,6 +397,90 @@ func TestOriginalTransactionAndReservationProofs(t *testing.T) {
 		}
 
 	})
+	t.Run("recovery audit uses exact terminal evidence without winner capability", func(t *testing.T) {
+		for _, committed := range []bool{true, false} {
+			id := fmt.Sprintf("recovery-audit-%t", committed)
+			e := reserve(t, s, id)
+			ref := e.References()[0]
+			if err := s.RecordRecoveryFinal(ctx, ref, transaction.FinalCommitConfirmed); !errors.Is(err, transaction.ErrStaleExecution) {
+				t.Fatal("prepared witness accepted", err)
+			}
+			outcome := transaction.FinalRollbackConfirmed
+			want := transaction.Rollback
+			if committed {
+				outcome = transaction.FinalCommitConfirmed
+				want = transaction.Commit
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				guard, err := s.Bind(ctx, tx, e)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = tx.ExecContext(ctx, `INSERT INTO tx_business VALUES(?,1)`, id); err != nil {
+					t.Fatal(err)
+				}
+				if err = guard.CommitWitness(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err = tx.Commit(); err != nil {
+					t.Fatal(err)
+				}
+			} else if ok, err := s.Abort(ctx, e); err != nil || !ok {
+				t.Fatal(err)
+			}
+			if err := s.RecordFinal(ctx, e, ref, transaction.FinalUnknown, "lost_ack"); err != nil {
+				t.Fatal(err)
+			}
+			observer, err := New(db, s.binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observed, err := observer.Lookup(ctx, transaction.RequestFor(e.Plan))
+			if err != nil || observed.Execution.Token != [32]byte{} {
+				t.Fatal("observer gained capability", err)
+			}
+			if err = observer.RecordRecoveryFinal(ctx, ref, outcome); err != nil {
+				t.Fatal(err)
+			}
+			ek, bk := key(e), transaction.BranchKey(ref.BranchID)
+			var final string
+			var first, second time.Time
+			if err = db.QueryRow(`SELECT final_outcome,final_recorded_at FROM rm_tx_witness WHERE execution_key=? AND branch_key=?`, ek[:], bk[:]).Scan(&final, &first); err != nil || final != string(outcome) {
+				t.Fatal("recovery audit not persisted", err)
+			}
+			if err = observer.RecordRecoveryFinal(ctx, ref, outcome); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.QueryRow(`SELECT final_recorded_at FROM rm_tx_witness WHERE execution_key=? AND branch_key=?`, ek[:], bk[:]).Scan(&second); err != nil || !first.Equal(second) {
+				t.Fatal("first audit time replaced", err)
+			}
+			for _, bad := range []transaction.Reference{func() transaction.Reference { r := ref; r.Owner = "other"; return r }(), func() transaction.Reference { r := ref; r.Fence++; return r }(), func() transaction.Reference { r := ref; r.WireHash[0] ^= 1; return r }()} {
+				if err = observer.RecordRecoveryFinal(ctx, bad, outcome); err == nil {
+					t.Fatal("inexact recovery evidence accepted")
+				}
+			}
+			if err = observer.RecordRecoveryFinal(ctx, ref, transaction.FinalUnknown); err == nil {
+				t.Fatal("unknown audit accepted")
+			}
+			opposite := transaction.FinalCommitConfirmed
+			if committed {
+				opposite = transaction.FinalRollbackConfirmed
+			}
+			if err = observer.RecordRecoveryFinal(ctx, ref, opposite); !errors.Is(err, transaction.ErrStaleExecution) {
+				t.Fatal("contradictory local state accepted", err)
+			}
+			if err = s.RecordFinal(ctx, e, ref, transaction.FinalUnknown, "late_timeout"); !errors.Is(err, transaction.ErrStaleExecution) {
+				t.Fatal("recovery confirmation downgraded", err)
+			}
+			assertDecision(t, s, e, want)
+			var count int
+			if err = db.QueryRow(`SELECT COUNT(*) FROM tx_business WHERE id=?`, id).Scan(&count); err != nil || count != map[bool]int{true: 1, false: 0}[committed] {
+				t.Fatal("audit changed business facts", err)
+			}
+		}
+	})
 	t.Run("schema and store identity fail closed", func(t *testing.T) {
 		wrong, err := New(db, transaction.Binding{Owner: "test.mysql", StoreID: "wrong", WriterEpoch: "epoch"})
 		if err != nil {

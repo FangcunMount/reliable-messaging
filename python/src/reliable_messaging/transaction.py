@@ -406,6 +406,12 @@ class AuthorizedStore(Store, Protocol):
     ) -> Reservation: ...
 
 
+class RecoveryReceiptRecorder(Protocol):
+    """Optional positive recovery RPC audit; never local commitment authority."""
+
+    async def record_recovery_final(self, reference: Reference, outcome: FinalOutcome) -> None: ...
+
+
 class Guard(Protocol):
     async def commit_witness(self) -> None: ...
 
