@@ -83,7 +83,7 @@ def main():
             report["mongo_probe_sha256"] = hashlib.sha256(mongo_binary.read_bytes()).hexdigest()
             report["source_sha256"] = {
                 str(p.relative_to(sdk)): hashlib.sha256(p.read_bytes()).hexdigest()
-                for directory in ("transaction", "storage/transaction")
+                for directory in ("transaction", "storage/transaction", "internal/transactionobservation")
                 for p in sorted((sdk / directory).rglob("*")) if p.is_file()}
             run(compose + ["up", "-d", "--wait", "--wait-timeout", "180", "mysql", "mongo"])
             container = run(compose + ["ps", "-q", "mysql"])

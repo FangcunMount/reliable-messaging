@@ -1,8 +1,24 @@
 # 版本与发布索引
 
-本页记录可消费的固定语言版本、源码与发布资产。2026-10-20（UTC+8）新增Go指标并发修订预发布；Python继续使用原固定版本。宿主依赖、部署和业务验收由各宿主另行记录，历史条目保留其采集日期。
+本页记录可消费的固定语言版本、源码与发布资产。最新源码正在准备T24协议观察预发布；已发布制品与候选分别记录。宿主依赖、部署和业务验收由各宿主另行记录，历史条目保留其采集日期。
 
-<!-- source-python-version: 0.4.0a3 -->
+<!-- source-python-version: 0.4.0a4 -->
+
+## T24 回查审计与协议观察候选（2026-10-23）
+
+拟发布 Go `v0.5.0-rocketmq-tx.4` 与 Python `0.4.0a4`（tag `python/v0.4.0a4`），
+两者绑定同一冻结源码。版本名已核验未占用；目前尚未创建tag或发布资产。候选加入
+[PR54](https://github.com/FangcunMount/reliable-messaging/pull/54)的成功回查RPC审计，
+以及[PR55](https://github.com/FangcunMount/reliable-messaging/pull/55)的只读协议观察：
+区分确认观察缺口、未跟踪中止分支及lease到期年龄，不将它们当作实际Broker积压或
+消费者receipt，不改变codec/schema/wire或业务执行器。
+
+已有组件证明为Go三档MySQL/Mongo各29项、Python两档源码与wheel各145项；
+持续Broker门禁两档各41项（其中10项真实跨实例正向RPC审计）。候选固定SHA仍须取得
+自身完整源码/真实存储及独立wheel门禁；发布与发布后下载、摘要及安装验收分别记录。
+存储报告清单同时覆盖内部元数据分类器；旧组件报告仍保持原始来源。宿主指标和准入
+保护尚未接入；稳定发布、生产、system与48h观察不由本预发布替代。进度见
+[infra唯一总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)。
 
 ## Python telemetry 恢复预发布（2026-10-23）
 
