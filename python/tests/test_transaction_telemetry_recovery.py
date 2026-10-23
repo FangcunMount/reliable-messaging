@@ -5,6 +5,7 @@ import threading
 from concurrent.futures import Future
 from types import SimpleNamespace
 
+import pytest
 from rocketmq.grpc_protocol import Code
 from rocketmq.v5.producer import Producer
 
@@ -41,13 +42,23 @@ async def test_closed_telemetry_recovers_on_healthy_heartbeat_only_on_own_instan
             call = SimpleNamespace(done=lambda current=client: current.closed)
             channel = SimpleNamespace(
                 telemetry_stream_stream_call=SimpleNamespace(
-                    _RpcStreamStreamCall__stream_stream_call=call
+                    _RpcStreamStreamCall__stream_stream_call=call,
+                    _rm_settings_enqueued=True,
                 )
             )
+
+            def settings_write(endpoints: object, request: object) -> Future[None]:
+                done: Future[None] = Future()
+                done.set_result(None)
+                return done
+
             producer._Client__rpc_client = SimpleNamespace(
+                channels=SimpleNamespace(get=lambda endpoints, current=channel: current),
                 retrieve_or_create_channel=lambda endpoints, current=channel: current,
                 get_channel_io_loop=client.original_rpc.get_channel_io_loop,
+                telemetry_write_async=settings_write,
             )
+            producer.sync_setting_req = lambda endpoints: None
             producer._Client__is_running = True
 
             def register(endpoints: object, current: SimpleNamespace = client) -> None:
@@ -65,7 +76,9 @@ async def test_closed_telemetry_recovers_on_healthy_heartbeat_only_on_own_instan
                         status=SimpleNamespace(code=code, message="synthetic heartbeat")
                     )
                 )
-                client.producer._Client__heartbeat_callback(future, object())
+                endpoint = SimpleNamespace(facade="fixture")
+                client.producer.rpc_client.heartbeat_async = lambda *args, **kwargs: future
+                client.producer._Client__heartbeat_async(endpoint)
 
             await asyncio.wrap_future(
                 asyncio.run_coroutine_threadsafe(invoke(), client.producer._rpc_channel_io_loop())
@@ -80,6 +93,15 @@ async def test_closed_telemetry_recovers_on_healthy_heartbeat_only_on_own_instan
         assert {thread.ident for thread in threading.enumerate()} == threads
         assert Producer._Client__heartbeat_callback is original
         assert all(pool.snapshot()["admitted"] == 0 for pool in pools)
+        # A replacement stream may exist without any queued settings even
+        # when the server still has a cached client record.
+        stream = second.producer.rpc_client.channels.get(None).telemetry_stream_stream_call
+        del stream._rm_settings_enqueued
+        await heartbeat(second)
+        assert second.producer._rm_settings.snapshot()["settings_writes"] == 1
+        await heartbeat(second, Code.UNRECOGNIZED_CLIENT_TYPE)
+        assert second.producer._rm_settings.snapshot()["settings_writes"] == 2
+        assert second.registrations == 0  # Reuse the active stream; resend settings.
 
         first.closed = True
         await heartbeat(first, Code.UNRECOGNIZED_CLIENT_TYPE)
@@ -102,3 +124,53 @@ async def test_closed_telemetry_recovers_on_healthy_heartbeat_only_on_own_instan
             await asyncio.to_thread(client.producer.shutdown)
         for pool in pools:
             await pool.drain()
+
+
+async def test_settings_sync_coalesces_until_actual_completion_and_close_waits() -> None:
+    from reliable_messaging._rocketmq_transaction_driver import _SettingsSync
+
+    writes = []
+    callbacks = []
+    manager = SimpleNamespace(
+        _ClientTelemetryManager__setting_write_callback=lambda done, **kwargs: callbacks.append(
+            done.result()
+        )
+    )
+
+    def write(endpoints: object, request: object) -> Future[None]:
+        future: Future[None] = Future()
+        writes.append(future)
+        return future
+
+    stream = SimpleNamespace()
+    client = SimpleNamespace(
+        _Client__telemetry_manager=manager,
+        rpc_client=SimpleNamespace(
+            telemetry_write_async=write,
+            channels=SimpleNamespace(
+                get=lambda endpoints: SimpleNamespace(telemetry_stream_stream_call=stream)
+            ),
+        ),
+        sync_setting_req=lambda endpoints: None,
+    )
+    state = _SettingsSync(client)
+    endpoint = SimpleNamespace(facade="fixture")
+    manager.setting_write(endpoint)
+    for _ in range(1000):
+        manager.setting_write(endpoint)
+    assert len(writes) == 1 and state.snapshot()["pending_settings"] == 1
+    cancelled = []
+    state.started[endpoint.facade] -= 2
+    assert state.busy(endpoint, 1, SimpleNamespace(cancel=lambda: cancelled.append(True)))
+    assert cancelled == [True] and state.snapshot()["pending_settings"] == 1
+    state.stop()
+    manager.setting_write(endpoint)
+    waiter = asyncio.create_task(asyncio.to_thread(state.wait))
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.02):
+            await asyncio.shield(waiter)
+    assert not waiter.done() and state.snapshot()["pending_settings"] == 1
+    writes[0].set_result(None)
+    await waiter
+    assert state.snapshot()["pending_settings"] == 0 and not callbacks
+    assert len(writes) == 1  # No restart or write after metadata admission closes.

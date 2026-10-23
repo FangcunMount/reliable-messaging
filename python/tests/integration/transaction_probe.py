@@ -68,6 +68,36 @@ class ObservedStore:
         return evidence
 
 
+async def live_snapshot(sender):
+    async def read_client():
+        client = sender._client
+        value = client._rm_settings.snapshot()
+        scheduler = getattr(client, "_Client__heartbeat_scheduler", None)
+        thread = getattr(scheduler, "_ClientScheduler__scheduler_thread", None)
+        channels = list(client.rpc_client.channels.values())
+        streams = [
+            getattr(
+                channel.telemetry_stream_stream_call,
+                "_RpcStreamStreamCall__stream_stream_call",
+                None,
+            )
+            for channel in channels
+        ]
+        value.update(
+            client_running=bool(client.is_running),
+            heartbeat_thread_alive=thread is not None and thread.is_alive(),
+            route_endpoints=len(client._Client__route_manager.get_all_endpoints()),
+            channels=len(channels),
+            closed_streams=sum(call is not None and call.done() for call in streams),
+            open_streams=sum(call is not None and not call.done() for call in streams),
+        )
+        return value
+
+    loop = sender._client._rpc_channel_io_loop()
+    value = await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(read_client(), loop))
+    return dict(telemetry=value, sdk=sender.stats())
+
+
 async def run(args):
     config = json.loads(args.config.read_text())
     if not config["endpoint"].startswith("127.0.0.1:") or "@127.0.0.1:" not in config["mysql_url"]:
@@ -300,8 +330,13 @@ async def run(args):
                             await asyncio.sleep(0.05)
                     observed_store.enabled = True
                     emit("live_waiting", identity, "admission_stopped_original_checks_drained")
-                    if (await asyncio.to_thread(sys.stdin.readline)).strip() != "stop":
-                        raise RuntimeError("explicit owned live-recovery stop required")
+                    while True:
+                        command = (await asyncio.to_thread(sys.stdin.readline)).strip()
+                        if command == "stop":
+                            break
+                        if command != "inspect":
+                            raise RuntimeError("explicit owned live-recovery control required")
+                        emit("live_telemetry", args.id, json.dumps(await live_snapshot(sender)))
                     emit(
                         "live_identity_after",
                         args.id,
@@ -326,6 +361,8 @@ async def run(args):
         ):
             raise RuntimeError("actual SDK resources remain after close")
         emit("metrics", args.id, json.dumps(stats))
+        if args.mode == "fault-live-broker":
+            emit("live_telemetry_closed", args.id, json.dumps(await live_snapshot(sender)))
         emit("closed", args.id, "drained")
     finally:
         # Never dispose a host pool while SDK resources are still running.
