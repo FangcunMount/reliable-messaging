@@ -446,14 +446,14 @@ func TestOriginalTransactionAndReservationProofs(t *testing.T) {
 			}
 			ek, bk := key(e), transaction.BranchKey(ref.BranchID)
 			var final string
-			var first, second time.Time
-			if err = db.QueryRow(`SELECT final_outcome,final_recorded_at FROM rm_tx_witness WHERE execution_key=? AND branch_key=?`, ek[:], bk[:]).Scan(&final, &first); err != nil || final != string(outcome) {
+			var first, second string
+			if err = db.QueryRow(`SELECT final_outcome,DATE_FORMAT(final_recorded_at,'%Y-%m-%d %H:%i:%s.%f') FROM rm_tx_witness WHERE execution_key=? AND branch_key=?`, ek[:], bk[:]).Scan(&final, &first); err != nil || final != string(outcome) {
 				t.Fatal("recovery audit not persisted", err)
 			}
 			if err = observer.RecordRecoveryFinal(ctx, ref, outcome); err != nil {
 				t.Fatal(err)
 			}
-			if err = db.QueryRow(`SELECT final_recorded_at FROM rm_tx_witness WHERE execution_key=? AND branch_key=?`, ek[:], bk[:]).Scan(&second); err != nil || !first.Equal(second) {
+			if err = db.QueryRow(`SELECT DATE_FORMAT(final_recorded_at,'%Y-%m-%d %H:%i:%s.%f') FROM rm_tx_witness WHERE execution_key=? AND branch_key=?`, ek[:], bk[:]).Scan(&second); err != nil || first != second {
 				t.Fatal("first audit time replaced", err)
 			}
 			for _, bad := range []transaction.Reference{func() transaction.Reference { r := ref; r.Owner = "other"; return r }(), func() transaction.Reference { r := ref; r.Fence++; return r }(), func() transaction.Reference { r := ref; r.WireHash[0] ^= 1; return r }()} {
