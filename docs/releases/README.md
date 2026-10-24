@@ -4,13 +4,22 @@
 
 <!-- source-python-version: 0.4.0 -->
 
-## M3 稳定版候选（2026-10-24，尚未发布）
+## M3 稳定版（2026-10-24）
 
-当前源码准备 Go `v0.5.0` 与 Python `0.4.0`，本条不是已发布制品。两个tag须绑定同一已合并源码SHA，版本占用、源码/真实存储/故障及独立wheel/sdist安装门禁全部通过后才创建Release；既有tag和资产不覆盖，不新增PyPI流程。
+已发布[Go v0.5.0](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.5.0)和[Python 0.4.0](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.4.0)，两个tag固定同一源码[`1345266aa0e864c46de5d1e3e3c939dd8002a890`](https://github.com/FangcunMount/reliable-messaging/commit/1345266aa0e864c46de5d1e3e3c939dd8002a890)。PR58合并91219070，完整tree与候选e5d3a387相同；不新增PyPI分发。相对tx.4/a4仅版本、构建断言和文档变化，接口/schema/codec/首次wire与客户端不变。
 
-相对已验证tx.4/a4，本候选只修改Python包版本、锁文件中的自身版本、构建版本断言及文档；Go/Python实现、公开接口、schema、codec、首次wire和固定底层客户端均不变。宿主当前仍用固定预发布，稳定版发布后另行锁定并完成T28最终验收。生产者事务一致性不证明消费者业务完成；原生回查有有限窗口，完整手工恢复工具不属于SDK稳定发布的生产承诺。
+精确候选12源码检查通过，三档存储各29项；Python两档源码/独立wheel各145项。实际公开SDK[40062507903](https://github.com/FangcunMount/infra/actions/runs/40062507903)两档各41项，完整故障/有限窗口[40062511606](https://github.com/FangcunMount/infra/actions/runs/40062511606)两档各48项，必需报告非空、零失败/跳过；所属清理通过，未选择的独立审计job为N/A。当前预发布六档宿主门禁T26也已收口，但稳定制品宿主重验另属T28。
 
-实际源码/制品、发布receipt、三库采用、生产和system验收分别记录，唯一进度见[infra M3总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)。候选CI尚待通过，不把候选wheel或健康容器视为上线。
+两个Release各9项资产，18项均重新下载并核对服务器digest；不覆盖旧资产、不移动tag。Go正式模块234份选定文件与固定源码相符，模块缓存transaction/rocketmq的race通过，无replace。发布wheel/sdist均从独立site-packages导入，各114纯测试通过；31项真实依赖本地明确排除，真实验证由上述CI承担。首次使用pytest importlib模式因原测试的同级helper导入无法收集，改回默认测试导入模式后通过；无产品修改，安装包来源独立核验。
+
+| 固定制品 | SHA256 / module sum |
+| --- | --- |
+| wheel | `f236674c3de81970af923992d337e2903d05ddbb401a735aad443d482ec95dc1` |
+| sdist | `ef171171eaee085a2b2fdce502b1218a710c9ab10b7b75978583263dcad07582` |
+| Go module | `h1:JUayISCwmVwrLbHfLvgiOo3jr3Dxs7JfWeF3/Br45O0=` |
+| Go go.mod | `h1:GPiWG8ZsX4pvIZ6QyvLnBVO5iCqNhvsnKwFcg0ftC7I=` |
+
+发布后安装证明以独立[receipt资产](https://github.com/FangcunMount/reliable-messaging/releases/download/python/v0.4.0/published-installation-receipt.json)追加，原发布receipt保持其发布时状态。稳定SDK不证明消费者业务完成，也不承诺无限Broker回查；未验收高级恢复工具不进首发生产包。宿主采用、生产、system及48小时观察由[infra M3总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-m3-execution.md)分别记录，本次没有生产切换。
 
 ## T24 回查审计与协议观察预发布（2026-10-23）
 
