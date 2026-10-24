@@ -1,6 +1,6 @@
 # RocketMQ 事务 SDK
 
-Go/Python 提供嵌入式 `TransactionalSender`，以原业务事务中的精确 witness 决定消息提交。宿主持有数据库连接、根事务、事件循环、运行生命周期及业务重试许可。本批候选版本为 Go `v0.5.0-rocketmq-tx.1`、Python `0.4.0a1`；发布与验证状态以[发布索引](../releases/README.md)为准，不能从源码版本推断已发布或生产采用。
+Go/Python 提供嵌入式 `TransactionalSender`，以原业务事务中的精确 witness 决定消息提交。宿主持有数据库连接、根事务、事件循环、运行生命周期及业务重试许可。当前稳定版候选为 Go `v0.5.0`、Python `0.4.0`；发布与验证状态以[发布索引](../releases/README.md)为准，不能从源码版本推断已发布或生产采用。
 
 本页是事务消息契约的唯一接入正文。旧[Outbox](../01-核心设计/事务与Outbox.md)与普通 `Publisher` 保持独立；事务证据没有旧 Outbox 状态机、Relay 或自动清理。业务迁移属于 M3，M2 不修改任何宿主或生产 provider。
 

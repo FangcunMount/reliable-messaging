@@ -1,6 +1,6 @@
 # Python reliable-messaging SDK
 
-独立分发包 fangcun-reliable-messaging，导入 reliable_messaging。它是嵌入式 async SDK，借用原事务/资源，不依赖 Go runtime 或宿主仓库。当前源码为 [pyproject.toml](pyproject.toml)的 **0.4.0a4**；制品来源与候选状态见[发布索引](../docs/releases/README.md)，不能从源码版本推断发布或生产采用。
+独立分发包 fangcun-reliable-messaging，导入 reliable_messaging。它是嵌入式 async SDK，借用原事务/资源，不依赖 Go runtime 或宿主仓库。当前源码为 [pyproject.toml](pyproject.toml)的 **0.4.0**（稳定版候选，发布状态见索引）；制品来源与候选状态见[发布索引](../docs/releases/README.md)，不能从源码版本推断发布或生产采用。
 
 ## 安装
 

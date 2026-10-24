@@ -100,7 +100,8 @@ jobs:
           PY
       - name: Build deterministic fixed candidate assets
         run: |
-          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          export SOURCE_DATE_EPOCH
           uv build
       - name: Verify installed wheel independently of the source tree
         run: |
@@ -113,7 +114,7 @@ jobs:
           from pathlib import Path
           import sys
           import reliable_messaging
-          assert version('fangcun-reliable-messaging') == '0.4.0a4'
+          assert version('fangcun-reliable-messaging') == '0.4.0'
           assert Path(reliable_messaging.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
           from reliable_messaging.rocketmq_transaction import TransactionalSender
           assert all(callable(getattr(TransactionalSender, name, None)) for name in ('retry', 'replan'))
