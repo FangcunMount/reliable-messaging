@@ -42,7 +42,7 @@ from reliable_messaging.transaction import (
     encode_reference,
     resolve,
 )
-from reliable_messaging.transport import physical_topic_v2
+from reliable_messaging.transport import RouteBinding, RouteResolver, expected_physical_topic
 
 REFERENCE_PROPERTY = "rm_tx_ref"
 _T = TypeVar("_T")
@@ -63,6 +63,7 @@ class TransactionRoute:
     logical_topic: str
     physical_topic: str
     revision: str
+    naming_scheme: str = ""
 
 
 @dataclass(frozen=True)
@@ -73,16 +74,20 @@ class TransactionConfig:
     owner: str
     routes: tuple[TransactionRoute, ...]
     limits: Limits = field(default_factory=Limits)
+    historical_routes: tuple[TransactionRoute, ...] = ()
 
     def __post_init__(self) -> None:
         host, sep, port = self.endpoint.rpartition(":")
         if not host or not sep or not port.isdigit() or not 1 <= int(port) <= 65535:
             raise ValueError("explicit host:port endpoint required")
         object.__setattr__(self, "routes", tuple(self.routes))
+        object.__setattr__(self, "historical_routes", tuple(self.historical_routes))
         if any(
             r.physical_topic
-            != physical_topic_v2(r.logical_topic, "TRANSACTION", self.owner, r.revision)
-            for r in self.routes
+            != expected_physical_topic(
+                r.logical_topic, "TRANSACTION", self.owner, r.revision, r.naming_scheme
+            )
+            for r in (*self.routes, *self.historical_routes)
         ):
             raise ValueError("canonical transaction owner routes required")
         if (
@@ -95,6 +100,23 @@ class TransactionConfig:
             or len({(r.logical_topic, r.revision) for r in self.routes}) != len(self.routes)
         ):
             raise ValueError("explicit unique owner routes required")
+        if len(self.historical_routes) > 256:
+            raise ValueError("bounded historical owner routes required")
+
+        def bindings(values: tuple[TransactionRoute, ...]) -> tuple[RouteBinding, ...]:
+            return tuple(
+                RouteBinding(
+                    topic=r.logical_topic,
+                    physical_topic=r.physical_topic,
+                    message_type="TRANSACTION",
+                    owner=self.owner,
+                    route_revision=r.revision,
+                    naming_scheme=r.naming_scheme,
+                )
+                for r in values
+            )
+
+        RouteResolver(bindings(self.routes), bindings(self.historical_routes))
 
 
 class TransactionSendError(RuntimeError):
@@ -312,6 +334,27 @@ class TransactionalSender:
         if previous.fence >= MAX_FENCE:
             raise ValueError("previous transaction fence cannot advance")
 
+    def _validate_recorded_previous(self, previous: Execution) -> None:
+        plan = previous.plan
+        if (
+            plan.owner != self.config.owner
+            or len(plan.branches) > self.config.limits.branches
+            or previous.fence >= MAX_FENCE
+        ):
+            raise BindingError("previous owner, budget or fence differs")
+        routes = {
+            r.physical_topic: r for r in (*self.config.routes, *self.config.historical_routes)
+        }
+        for branch in plan.branches:
+            route = routes.get(branch.physical_topic)
+            if (
+                route is None
+                or route.logical_topic != branch.message.destination
+                or route.revision != branch.route_revision
+                or len(branch.wire) > 262144
+            ):
+                raise BindingError("previous route not in reviewed history")
+
     def _authorized_store(self) -> AuthorizedStore:
         if not all(callable(getattr(self.store, name, None)) for name in ("retry", "replan")):
             raise BindingError("host-authorized transaction store required")
@@ -330,7 +373,7 @@ class TransactionalSender:
 
     async def replan(self, authorization: ReplanAuthorization) -> Reservation:
         """Only the store's exact aborted CAS can grant the new complete plan."""
-        self._validate_previous(authorization.previous)
+        self._validate_recorded_previous(authorization.previous)
         self._validate_plan(authorization.candidate)
         plan = authorization.previous.plan
         Request(plan.owner, plan.scope, plan.idempotency_key, plan.input_hash).match(

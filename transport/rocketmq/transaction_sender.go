@@ -110,7 +110,7 @@ func (s *TransactionalSender) Retry(ctx context.Context, authorization transacti
 // under an explicit host authorization. The store owns its exact terminal CAS;
 // the sender contributes route validation, shared admission and shutdown bounds.
 func (s *TransactionalSender) Replan(ctx context.Context, authorization transaction.ReplanAuthorization) (transaction.Reservation, error) {
-	if err := s.validatePrevious(authorization.Previous); err != nil {
+	if err := s.validateRecordedPrevious(authorization.Previous); err != nil {
 		return transaction.Reservation{}, err
 	}
 	if err := s.validatePlan(authorization.Candidate); err != nil {
@@ -135,6 +135,31 @@ func (s *TransactionalSender) Replan(ctx context.Context, authorization transact
 	r, err := store.Replan(budget, authorization, transaction.ReserveOptions{Lease: s.config.Limits.Lease})
 	s.storeError(err)
 	return r, err
+}
+
+// Exact historical evidence permits an authorized Replan, never Retry/Execute
+// on a retired physical route. The store still proves the previous Aborted CAS.
+func (s *TransactionalSender) validateRecordedPrevious(previous transaction.Execution) error {
+	if len(previous.References()) == 0 || previous.Fence >= transaction.MaxFence {
+		return transaction.ErrInvalidPlan
+	}
+	if !previous.Plan.Valid() || previous.Plan.Input().Owner != s.config.Owner || len(previous.Plan.Input().Branches) > s.config.Limits.Branches {
+		return transaction.ErrInvalidPlan
+	}
+	for _, branch := range previous.Plan.Input().Branches {
+		found := false
+		for _, list := range [][]TransactionRoute{s.config.Routes, s.config.HistoricalRoutes} {
+			for _, r := range list {
+				if r.PhysicalTopic == branch.PhysicalTopic && r.LogicalTopic == branch.Message.Input().Destination && r.Revision == branch.RouteRevision && len(branch.Wire) <= 262144 {
+					found = true
+				}
+			}
+		}
+		if !found {
+			return transaction.ErrBinding
+		}
+	}
+	return nil
 }
 
 func (s *TransactionalSender) validatePrevious(previous transaction.Execution) error {

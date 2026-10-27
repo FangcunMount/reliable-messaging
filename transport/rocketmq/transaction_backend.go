@@ -24,11 +24,13 @@ type TransactionRoute struct {
 	LogicalTopic  string `json:"topic"`
 	PhysicalTopic string `json:"physical_topic"`
 	Revision      string `json:"route_revision"`
+	NamingScheme  string `json:"naming_scheme,omitempty"`
 }
 type TransactionConfig struct {
 	TLS                                   *tls.Config
 	Endpoint, AccessKey, SecretKey, Owner string
 	Routes                                []TransactionRoute
+	HistoricalRoutes                      []TransactionRoute
 	Limits                                transaction.Limits
 }
 type transactionHandle interface {
@@ -67,7 +69,7 @@ func validateTransactionConfig(c TransactionConfig, store transaction.PreparedSt
 	physical := map[string]bool{}
 	logical := map[[2]string]bool{}
 	for _, r := range c.Routes {
-		expected, err := transport.PhysicalTopicV2(r.LogicalTopic, transport.TransactionMessageType, c.Owner, r.Revision)
+		expected, err := transport.ExpectedPhysicalTopic(r.LogicalTopic, transport.TransactionMessageType, c.Owner, r.Revision, r.NamingScheme)
 		if err != nil || r.PhysicalTopic != expected {
 			return c, transaction.ErrBinding
 		}
@@ -78,6 +80,25 @@ func validateTransactionConfig(c TransactionConfig, store transaction.PreparedSt
 		logical[[2]string{r.LogicalTopic, r.Revision}] = true
 	}
 	c.Routes = append([]TransactionRoute(nil), c.Routes...)
+	active := make([]transport.RouteBinding, 0, len(c.Routes))
+	history := make([]transport.RouteBinding, 0, len(c.HistoricalRoutes))
+	if len(c.HistoricalRoutes) > 256 {
+		return c, transaction.ErrBinding
+	}
+	for i, list := range [][]TransactionRoute{c.Routes, c.HistoricalRoutes} {
+		for _, r := range list {
+			row := transport.RouteBinding{Topic: r.LogicalTopic, PhysicalTopic: r.PhysicalTopic, MessageType: transport.TransactionMessageType, Owner: c.Owner, RouteRevision: r.Revision, NamingScheme: r.NamingScheme}
+			if i == 0 {
+				active = append(active, row)
+			} else {
+				history = append(history, row)
+			}
+		}
+	}
+	if _, err := transport.NewRouteResolver(active, history); err != nil {
+		return c, transaction.ErrBinding
+	}
+	c.HistoricalRoutes = append([]TransactionRoute(nil), c.HistoricalRoutes...)
 	return c, nil
 }
 

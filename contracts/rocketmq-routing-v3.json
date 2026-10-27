@@ -1,0 +1,125 @@
+{
+  "version": 3,
+  "vectors": [
+    {
+      "topic": "iam.authz.version.v2",
+      "subscription": "iam-policy-sync.iam-primary-1",
+      "message_type": "TRANSACTION",
+      "owner": "iam.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "iam-authz-version-v2--tx--iam-mysql--m3-1",
+      "consumer_group": "iam-authz-version-v2--iam-policy-sync-iam-primary-1",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "iam.authz.version.v2",
+      "subscription": "qs-authz-sync-apiserver-qs-apiserver-1",
+      "message_type": "TRANSACTION",
+      "owner": "iam.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "iam-authz-version-v2--tx--iam-mysql--m3-1",
+      "consumer_group": "iam-authz-version-v2--qs-authz-sync-apiserver-qs-apiserver-1",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "iam.notify.sms",
+      "subscription": "",
+      "message_type": "NORMAL",
+      "owner": "iam.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "iam-notify-sms--normal--iam-mysql--m3-1",
+      "consumer_group": "",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "qs.survey.lifecycle",
+      "subscription": "qs-worker",
+      "message_type": "NORMAL",
+      "owner": "qs.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "qs-survey-lifecycle--normal--qs-mysql--m3-1",
+      "consumer_group": "qs-survey-lifecycle--qs-worker",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "qs.evaluation.lifecycle",
+      "subscription": "qs-apiserver-modelcatalog-hot-rank-v1",
+      "message_type": "TRANSACTION",
+      "owner": "qs.mongo",
+      "route_revision": "m3-1",
+      "physical_topic": "qs-evaluation-lifecycle--tx--qs-mongo--m3-1",
+      "consumer_group": "qs-evaluation-lifecycle--qs-apiserver-modelcatalog-hot-rank-v1",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "qs.evaluation.lifecycle",
+      "subscription": "qs-worker",
+      "message_type": "TRANSACTION",
+      "owner": "qs.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "qs-evaluation-lifecycle--tx--qs-mysql--m3-1",
+      "consumer_group": "qs-evaluation-lifecycle--qs-worker",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "qs.evaluation.lifecycle",
+      "subscription": "qs-worker",
+      "message_type": "TRANSACTION",
+      "owner": "qs.mongo",
+      "route_revision": "m3-1",
+      "physical_topic": "qs-evaluation-lifecycle--tx--qs-mongo--m3-1",
+      "consumer_group": "qs-evaluation-lifecycle--qs-worker",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "qs.plan.task",
+      "subscription": "qs-worker",
+      "message_type": "NORMAL",
+      "owner": "qs.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "qs-plan-task--normal--qs-mysql--m3-1",
+      "consumer_group": "qs-plan-task--qs-worker",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "qs.plan.task",
+      "subscription": "qs-worker",
+      "message_type": "TRANSACTION",
+      "owner": "qs.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "qs-plan-task--tx--qs-mysql--m3-1",
+      "consumer_group": "qs-plan-task--qs-worker",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "qs.ai.commands.v1",
+      "subscription": "qs-ai.commands.v1",
+      "message_type": "TRANSACTION",
+      "owner": "qs.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "qs-ai-commands-v1--tx--qs-mysql--m3-1",
+      "consumer_group": "qs-ai-commands-v1--qs-ai-commands-v1",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "qs.ai.acks.v1",
+      "subscription": "qs-ai.acks.v1",
+      "message_type": "TRANSACTION",
+      "owner": "qs.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "qs-ai-acks-v1--tx--qs-mysql--m3-1",
+      "consumer_group": "qs-ai-acks-v1--qs-ai-acks-v1",
+      "naming_scheme": "readable-v1"
+    },
+    {
+      "topic": "qs.ai.events.v1",
+      "subscription": "qs-server.ai-events.v1",
+      "message_type": "TRANSACTION",
+      "owner": "ai.mysql",
+      "route_revision": "m3-1",
+      "physical_topic": "qs-ai-events-v1--tx--ai-mysql--m3-1",
+      "consumer_group": "qs-ai-events-v1--qs-server-ai-events-v1",
+      "naming_scheme": "readable-v1"
+    }
+  ]
+}

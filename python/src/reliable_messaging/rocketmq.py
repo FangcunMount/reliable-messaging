@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from reliable_messaging.delivery import Confirmation, DeliveryResult, Outcome
-from reliable_messaging.transport import Received, RouteBinding, validate_routes
+from reliable_messaging.transport import Received, RouteBinding, RouteResolver
 from reliable_messaging.wire import MAX_METADATA_BYTES, decode, go_json
 
 
@@ -27,6 +27,7 @@ class Config:
     routes: tuple[RouteBinding, ...]
     timeout: float = 5.0
     max_in_flight: int = 16
+    historical_routes: tuple[RouteBinding, ...] = ()
 
     def __post_init__(self) -> None:
         host, separator, port = self.endpoint.rpartition(":")
@@ -37,7 +38,8 @@ class Config:
         if not 1 <= self.max_in_flight <= 1000:
             raise ValueError("in-flight limit must be1..1000")
         object.__setattr__(self, "routes", tuple(self.routes))
-        validate_routes(self.routes)
+        object.__setattr__(self, "historical_routes", tuple(self.historical_routes))
+        RouteResolver(self.routes, self.historical_routes)
 
 
 def _require_server_settings(client: Any, timeout: float) -> None:
