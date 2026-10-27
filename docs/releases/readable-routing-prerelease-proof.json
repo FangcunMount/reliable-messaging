@@ -1,0 +1,307 @@
+{
+  "source": "5c2e3cd155e67c0f766e93bf95238b16fc219b5f",
+  "published_assets_downloaded_and_verified": 18,
+  "installation": {
+    "source": "5c2e3cd155e67c0f766e93bf95238b16fc219b5f",
+    "python": {
+      "wheel": {
+        "installed_source_verified": true,
+        "editable": false,
+        "workspace_sdk_imported": false,
+        "source_files_equal": 16,
+        "version": "0.5.0rc1",
+        "python": "3.11.3",
+        "tests": 128,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "test_report_sha256": "05e3d49b4769659619d1a35b2810e5a359a0ba285474d8153ace418fd0c1484d",
+        "scope": "Pure tests only; MySQL and NSQ integration deselected/excluded locally. Full real-dependency acceptance is in CI 40511879302 and 40510978331."
+      },
+      "sdist": {
+        "installed_source_verified": true,
+        "editable": false,
+        "workspace_sdk_imported": false,
+        "source_files_equal": 16,
+        "version": "0.5.0rc1",
+        "python": "3.11.3",
+        "tests": 128,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "test_report_sha256": "a2c426a0522085eb8c3a09474c7e9a563e7c1c53230cbf08ff3eee70e3c828c9",
+        "scope": "Pure tests only; MySQL and NSQ integration deselected/excluded locally. Full real-dependency acceptance is in CI 40511879302 and 40510978331."
+      }
+    },
+    "go": {
+      "source": "5c2e3cd155e67c0f766e93bf95238b16fc219b5f",
+      "tag": "v0.6.0-rc.1",
+      "Sum": "h1:kGWE8og29Er3UYYaNzPgaXj/T/2ltmQJrb+/iI4+nGo=",
+      "GoModSum": "h1:GPiWG8ZsX4pvIZ6QyvLnBVO5iCqNhvsnKwFcg0ftC7I=",
+      "selected_source_files_equal": 193,
+      "replace_used": false,
+      "race_packages": [
+        "transaction",
+        "transport",
+        "transport/rocketmq"
+      ],
+      "race_log_sha256": "0d9e16ed616e7e8c2954796da968effa895fd52b550546ae5cc4dbd2d302a1e4"
+    }
+  },
+  "release_receipt": {
+    "source": "5c2e3cd155e67c0f766e93bf95238b16fc219b5f",
+    "go_tag": "v0.6.0-rc.1",
+    "python_tag": "python/v0.5.0rc1",
+    "verified_at": "2026-10-27T13:46:31.622859+00:00",
+    "initial_release_assets_verified": 12,
+    "server_digests_match": true,
+    "two_release_asset_sets_equal": true,
+    "tags_not_moved": true,
+    "published_assets_not_replaced": true,
+    "go_no_local_replace": true,
+    "python_no_editable_or_workspace_import": true,
+    "tests_summary_sha256": "103cc141cdbf25309a0f0a11d7bc7ba8342b2cc3cc1d83a878687a9e726c6bb3"
+  },
+  "acceptance": {
+    "source_sha": "5c2e3cd155e67c0f766e93bf95238b16fc219b5f",
+    "go_version": "v0.6.0-rc.1",
+    "python_version": "0.5.0rc1",
+    "python_tag": "python/v0.5.0rc1",
+    "naming_scheme": "readable-v1",
+    "manifest_version": 3,
+    "production_changed": false,
+    "limits": [
+      "SDK prerelease only; host adoption and production acceptance remain separate."
+    ],
+    "python": [
+      {
+        "matrix": "python-3.11-mysql-8.0.36",
+        "run": "https://github.com/FangcunMount/reliable-messaging/actions/runs/40511879302",
+        "reports": {
+          "results.xml": {
+            "tests": 159,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "wheel-results.xml": {
+            "tests": 159,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      },
+      {
+        "matrix": "python-3.13-mysql-8.4",
+        "run": "https://github.com/FangcunMount/reliable-messaging/actions/runs/40511879302",
+        "reports": {
+          "results.xml": {
+            "tests": 159,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "wheel-results.xml": {
+            "tests": 159,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      }
+    ],
+    "storage": [
+      {
+        "matrix": "tx-storage-0-5c2e3cd155e67c0f766e93bf95238b16fc219b5f",
+        "run": "https://github.com/FangcunMount/reliable-messaging/actions/runs/40511886874",
+        "passed": 29,
+        "failed": 0,
+        "skipped": 0,
+        "report_sha256": "a8d24edf65305fd50314afd3111dced448058bd104de77ddc69d9d3cc6b09809"
+      },
+      {
+        "matrix": "tx-storage-1-5c2e3cd155e67c0f766e93bf95238b16fc219b5f",
+        "run": "https://github.com/FangcunMount/reliable-messaging/actions/runs/40511886874",
+        "passed": 29,
+        "failed": 0,
+        "skipped": 0,
+        "report_sha256": "a682e991194d1ffdaf03f98979c84c4e1113f1efc29a7c63d5cfc71c876e5c55"
+      },
+      {
+        "matrix": "tx-storage-2-5c2e3cd155e67c0f766e93bf95238b16fc219b5f",
+        "run": "https://github.com/FangcunMount/reliable-messaging/actions/runs/40511886874",
+        "passed": 29,
+        "failed": 0,
+        "skipped": 0,
+        "report_sha256": "4e1b7f4c87d65d7617e718f0181c31bc8be13635f794052e6bdb634fc4695281"
+      }
+    ],
+    "native": [
+      {
+        "matrix": "rocketmq-readable-0-5ba26625d9bd1c53b954c73bf886e82c4be75798",
+        "run": "https://github.com/FangcunMount/infra/actions/runs/40510978331",
+        "passed": 31,
+        "failed": 0,
+        "skipped": 0,
+        "image": "sha256:8e0f06a6c38e1de2960e682285f17abf314754b26110b03f91ff7b7628d4edfc",
+        "mysql_image": "sha256:f5f171121fa3e572eb30770e3c9a6ca240e822fdaea4e2f44882de402c8ce9d4",
+        "mongo_image": "sha256:9fae371f0280c30c40523dbda5edda96be4c8722cd1272d2ac79f699b2d955d3",
+        "clients": {
+          "go": "5.1.4",
+          "python": "5.1.2"
+        },
+        "cases": {
+          "v3_go_python_infra_exact_route_vectors": true,
+          "v2_existing_type_conflict_refuses_all_resource_mutations": true,
+          "v2_idempotent_typed_resources_and_minimum_owner_acls": true,
+          "v2_existing_configuration_conflict_refused": true,
+          "v2_sdk-go_wrong_owner_broker_denied_without_business": true,
+          "v2_sdk-python_wrong_owner_broker_denied_without_business": true,
+          "public_go_mysql_half_then_commit": true,
+          "public_go_mysql_half_then_rollback": true,
+          "public_go_mysql_new_instance_crash-committed": true,
+          "public_go_mysql_new_instance_crash-prepared": true,
+          "public_go_untrusted_ca_startup_really_drained": true,
+          "public_go_same_process_client_isolation": true,
+          "public_go_real_database_outage_unknown_then_recovery": true,
+          "public_go_mysql_exact_business_and_wire_set": true,
+          "public_go_mongo_half_then_commit": true,
+          "public_go_mongo_half_then_rollback": true,
+          "public_go_mongo_new_instance_crash-committed": true,
+          "public_go_mongo_new_instance_crash-prepared": true,
+          "public_go_mongo_exact_business_and_wire_set": true,
+          "public_python_half_then_commit": true,
+          "public_python_half_then_rollback": true,
+          "public_sdk-python_to_sdk-python_crash-committed": true,
+          "public_sdk-python_to_sdk-python_crash-prepared": true,
+          "public_sdk-go_to_sdk-python_crash-committed": true,
+          "public_sdk-python_to_sdk-go_crash-committed": true,
+          "public_python_real_database_outage_unknown_then_recovery": true,
+          "public_python_untrusted_ca_startup_really_drained": true,
+          "public_python_same_process_client_isolation": true,
+          "public_python_cross_language_exact_business_and_wire_set": true,
+          "v2_sdk-go_three_physical_inputs_share_two_handler_budget": true,
+          "v2_sdk-python_three_physical_inputs_share_two_handler_budget": true
+        },
+        "cleanup": {
+          "project_containers_remaining": false,
+          "compose_down_succeeded": true,
+          "probe_process_groups_drained": true,
+          "private_fixture_directory_removed": true
+        },
+        "effective_broker_parameters": {
+          "transactionTimeOut": 6000,
+          "transactionCheckInterval": 5000,
+          "transactionCheckMax": 24,
+          "fileReservedTime": 48
+        },
+        "report_sha256": "1e2cb4fc6f2412b65edff0bfbc94bd7b5318ea6322bd33c114f18f8260e157ec"
+      },
+      {
+        "matrix": "rocketmq-readable-1-5ba26625d9bd1c53b954c73bf886e82c4be75798",
+        "run": "https://github.com/FangcunMount/infra/actions/runs/40510978331",
+        "passed": 31,
+        "failed": 0,
+        "skipped": 0,
+        "image": "sha256:d79c6f745255cb74db51895abef4f81ff6d4d3a9749474518981eef71d4516d2",
+        "mysql_image": "sha256:b35575a03e5327131916eb8d39222c4c89590881fb44ed69b5814910e5fefa34",
+        "mongo_image": "sha256:9fae371f0280c30c40523dbda5edda96be4c8722cd1272d2ac79f699b2d955d3",
+        "clients": {
+          "go": "5.1.4",
+          "python": "5.1.2"
+        },
+        "cases": {
+          "v3_go_python_infra_exact_route_vectors": true,
+          "v2_existing_type_conflict_refuses_all_resource_mutations": true,
+          "v2_idempotent_typed_resources_and_minimum_owner_acls": true,
+          "v2_existing_configuration_conflict_refused": true,
+          "v2_sdk-go_wrong_owner_broker_denied_without_business": true,
+          "v2_sdk-python_wrong_owner_broker_denied_without_business": true,
+          "public_go_mysql_half_then_commit": true,
+          "public_go_mysql_half_then_rollback": true,
+          "public_go_mysql_new_instance_crash-committed": true,
+          "public_go_mysql_new_instance_crash-prepared": true,
+          "public_go_untrusted_ca_startup_really_drained": true,
+          "public_go_same_process_client_isolation": true,
+          "public_go_real_database_outage_unknown_then_recovery": true,
+          "public_go_mysql_exact_business_and_wire_set": true,
+          "public_go_mongo_half_then_commit": true,
+          "public_go_mongo_half_then_rollback": true,
+          "public_go_mongo_new_instance_crash-committed": true,
+          "public_go_mongo_new_instance_crash-prepared": true,
+          "public_go_mongo_exact_business_and_wire_set": true,
+          "public_python_half_then_commit": true,
+          "public_python_half_then_rollback": true,
+          "public_sdk-python_to_sdk-python_crash-committed": true,
+          "public_sdk-python_to_sdk-python_crash-prepared": true,
+          "public_sdk-go_to_sdk-python_crash-committed": true,
+          "public_sdk-python_to_sdk-go_crash-committed": true,
+          "public_python_real_database_outage_unknown_then_recovery": true,
+          "public_python_untrusted_ca_startup_really_drained": true,
+          "public_python_same_process_client_isolation": true,
+          "public_python_cross_language_exact_business_and_wire_set": true,
+          "v2_sdk-go_three_physical_inputs_share_two_handler_budget": true,
+          "v2_sdk-python_three_physical_inputs_share_two_handler_budget": true
+        },
+        "cleanup": {
+          "project_containers_remaining": false,
+          "compose_down_succeeded": true,
+          "probe_process_groups_drained": true,
+          "private_fixture_directory_removed": true
+        },
+        "effective_broker_parameters": {
+          "transactionTimeOut": 6000,
+          "transactionCheckInterval": 5000,
+          "transactionCheckMax": 24,
+          "fileReservedTime": 48
+        },
+        "report_sha256": "736471950f0d8c2f46424a8ca38eb777a993b13e96ca1ceef01e51bc86b260ae"
+      },
+      {
+        "matrix": "rocketmq-readable-2-5ba26625d9bd1c53b954c73bf886e82c4be75798",
+        "run": "https://github.com/FangcunMount/infra/actions/runs/40510978331",
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "image": "sha256:927ee354062c353e5b895ec4b199e9f03680fcc8491c1508e60099528999192b",
+        "mysql_image": "sha256:b35575a03e5327131916eb8d39222c4c89590881fb44ed69b5814910e5fefa34",
+        "mongo_image": "sha256:9fae371f0280c30c40523dbda5edda96be4c8722cd1272d2ac79f699b2d955d3",
+        "clients": {
+          "go": "5.1.4",
+          "python": "5.1.2"
+        },
+        "cases": {
+          "v3_go_python_infra_exact_route_vectors": true,
+          "v2_existing_type_conflict_refuses_all_resource_mutations": true,
+          "v2_idempotent_typed_resources_and_minimum_owner_acls": true,
+          "v2_existing_configuration_conflict_refused": true,
+          "public_python_surviving_producer_broker_sigkill_real_checks": true
+        },
+        "cleanup": {
+          "project_containers_remaining": false,
+          "compose_down_succeeded": true,
+          "probe_process_groups_drained": true,
+          "private_fixture_directory_removed": true
+        },
+        "effective_broker_parameters": {
+          "transactionTimeOut": 6000,
+          "transactionCheckInterval": 5000,
+          "transactionCheckMax": 24,
+          "fileReservedTime": 48
+        },
+        "report_sha256": "7e681626258546e89a83ce122e29db31f1758d71fda51cf0c3d3bdc4ee8af379"
+      }
+    ],
+    "previous_failures": [
+      "https://github.com/FangcunMount/infra/actions/runs/40506474433",
+      "https://github.com/FangcunMount/infra/actions/runs/40508512616"
+    ],
+    "source_checks": {
+      "pr": "https://github.com/FangcunMount/reliable-messaging/pull/62",
+      "pr_check_run": "https://github.com/FangcunMount/reliable-messaging/actions/runs/40510888040",
+      "merged_main": "eebdf1c5401ec41f3a7866dd03c2a7d32e760240",
+      "source_tree": "aab2537dfc0b95503f6f63a9522923118113b6be"
+    }
+  }
+}
