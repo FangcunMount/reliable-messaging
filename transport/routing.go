@@ -17,6 +17,7 @@ type RouteBinding struct {
 	MessageType   string `json:"message_type,omitempty"`
 	Owner         string `json:"owner,omitempty"`
 	RouteRevision string `json:"route_revision,omitempty"`
+	NamingScheme  string `json:"naming_scheme,omitempty"`
 }
 
 func PhysicalTopic(topic string) string { return "rmq_t_" + routeDigest(topic) }
@@ -37,24 +38,13 @@ func ValidateRoutes(routes []RouteBinding) error {
 	physical := map[string][4]string{}
 	groups := map[string][2]string{}
 	for _, r := range routes {
-		expected, group := PhysicalTopic(r.Topic), ""
-		if r.Subscription != "" {
-			group = ConsumerGroup(r.Topic, r.Subscription)
+		expected, err := ExpectedPhysicalTopic(r.Topic, r.MessageType, r.Owner, r.RouteRevision, r.NamingScheme)
+		if err != nil {
+			return err
 		}
-		if r.MessageType != "" {
-			var err error
-			expected, err = PhysicalTopicV2(r.Topic, r.MessageType, r.Owner, r.RouteRevision)
-			if err != nil {
-				return err
-			}
-			if r.Subscription != "" {
-				group, err = ConsumerGroupV2(r.Topic, r.Subscription)
-				if err != nil {
-					return err
-				}
-			}
-		} else if r.Owner != "" || r.RouteRevision != "" {
-			return errors.New("v2 type, owner and revision must be explicit together")
+		group, err := expectedConsumerGroup(r)
+		if err != nil {
+			return err
 		}
 		if r.Topic == "" || strings.ContainsRune(r.Topic, 0) || strings.ContainsRune(r.Subscription, 0) || r.PhysicalTopic != expected || r.ConsumerGroup != group {
 			return errors.New("invalid canonical route binding")

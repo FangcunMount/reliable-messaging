@@ -16,6 +16,7 @@ type Config struct {
 	TLS                            *tls.Config
 	Endpoint, AccessKey, SecretKey string
 	Routes                         []transport.RouteBinding
+	HistoricalRoutes               []transport.RouteBinding
 	RequestTimeout                 time.Duration
 	MaxInFlight                    int
 }
@@ -27,7 +28,7 @@ func validate(c Config) (Config, error) {
 	if c.AccessKey == "" || c.SecretKey == "" || c.RequestTimeout <= 0 || c.MaxInFlight < 1 || c.MaxInFlight > 1000 {
 		return c, errors.New("credentials, bounded timeout and in-flight limit required")
 	}
-	if err := transport.ValidateRoutes(c.Routes); err != nil {
+	if _, err := transport.NewRouteResolver(c.Routes, c.HistoricalRoutes); err != nil {
 		return c, err
 	}
 	if c.TLS == nil {
@@ -36,5 +37,6 @@ func validate(c Config) (Config, error) {
 		c.TLS = c.TLS.Clone()
 	}
 	c.Routes = append([]transport.RouteBinding(nil), c.Routes...)
+	c.HistoricalRoutes = append([]transport.RouteBinding(nil), c.HistoricalRoutes...)
 	return c, nil
 }

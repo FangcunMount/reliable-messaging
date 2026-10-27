@@ -125,7 +125,9 @@ async def run(args):
             config["secretkey"],
             config["owner"],
             tuple(
-                TransactionRoute(r["topic"], r["physical_topic"], r["route_revision"])
+                TransactionRoute(
+                    r["topic"], r["physical_topic"], r["route_revision"], r.get("naming_scheme", "")
+                )
                 for r in config["owner_routes"]
             ),
             Limits(lease=config.get("lease_millis", 15000) / 1000, reconcile_interval=0.2),
