@@ -2,7 +2,13 @@
 
 本页记录可消费的固定语言版本、源码与发布资产。2026-10-23新增T24协议观察固定预发布；已发布制品、宿主采用与生产验收分别记录。宿主依赖、部署和业务验收由各宿主另行记录，历史条目保留其采集日期。
 
-<!-- source-python-version: 0.4.0 -->
+<!-- source-python-version: 0.5.0rc1 -->
+
+## 可读资源命名候选（尚未发布）
+
+预定 Go `v0.6.0-rc.1` / Python `0.5.0rc1`（tag `python/v0.5.0rc1`），两个tag须绑定同一经验证SHA。名称占用时不覆盖；版本元数据、锁和构建验证通过后，仍须通过infra可读路由真实SDK及发布制品安装验收。当前不得据此替换宿主正式依赖或生产配置。
+
+[接口与历史证据边界](../02-接入指南/RocketMQ可读路由.md)；[唯一执行总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-readable-names-execution.md)。原已发布版本与证据保持不变。
 
 ## M3 稳定版（2026-10-24）
 
