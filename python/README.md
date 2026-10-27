@@ -1,6 +1,6 @@
 # Python reliable-messaging SDK
 
-独立分发包 fangcun-reliable-messaging，导入 reliable_messaging。它是嵌入式 async SDK，借用原事务/资源，不依赖 Go runtime 或宿主仓库。当前源码为 [pyproject.toml](pyproject.toml)的 **0.4.0**（稳定版候选，发布状态见索引）；制品来源与候选状态见[发布索引](../docs/releases/README.md)，不能从源码版本推断发布或生产采用。
+独立分发包 fangcun-reliable-messaging，导入 reliable_messaging。它是嵌入式 async SDK，借用原事务/资源，不依赖 Go runtime 或宿主仓库。当前源码为 [pyproject.toml](pyproject.toml)的 **0.5.0rc1**（已发布固定预发布，稳定版仍为0.4.0）；制品来源与候选状态见[发布索引](../docs/releases/README.md)，不能从源码版本推断发布或生产采用。
 
 ## 安装
 
@@ -51,7 +51,7 @@ uv build
 RocketMQ 的独立事务入口及原 SQLAlchemy 根事务示例见[事务 SDK](../docs/02-接入指南/RocketMQ事务SDK.md)；Python Mongo 不在本批。
 
 
-事务Sender新增源码入口 `retry(RetryAuthorization)` 和 `replan(ReplanAuthorization)`；它们仅包装宿主的显式授权，共用既有准入、数据库预算、在途任务与关闭流程。事务Store仍负责精确旧Aborted证明和新fence的原子CAS。入口不发送半消息、不调用业务或模型；不能将它们当作自动重试循环。当前固定0.4.0a1制品不含该新增接口，须等待固定修订发布后接入；详见[事务责任](../docs/01-核心设计/事务与Outbox.md#显式事务重试与重建计划)。
+事务Sender新增源码入口 `retry(RetryAuthorization)` 和 `replan(ReplanAuthorization)`；它们仅包装宿主的显式授权，共用既有准入、数据库预算、在途任务与关闭流程。事务Store仍负责精确旧Aborted证明和新fence的原子CAS。入口不发送半消息、不调用业务或模型；不能将它们当作自动重试循环。历史0.4.0a1制品不含该新增接口；稳定0.4.0及当前固定预发布0.5.0rc1已包含，接入时仍须锁定制品并完成宿主验收；详见[事务责任](../docs/01-核心设计/事务与Outbox.md#显式事务重试与重建计划)。
 
 
 [0.4.0a3](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.4.0a3) 是已发布的存活事务生产者 telemetry 恢复预发布，源码固定为 `2258ad70275ae974e71fb3ffeaa5ed7def4c2893`。它复用当前实例的已有心跳和 I/O loop，在收到 OK 或重启丢失 settings 的 40015 响应时，恢复自身已关闭 stream，或向活跃但未注册的 stream 补发 settings；每端点只允许一个真实 settings 写入，关闭时等待它实际结束，不改 codec、wire、schema 或业务执行器。已发布 0.4.0a2 及其资产保留；固定制品已完成发布后下载、摘要和隔离安装核验；实际宿主采用新制品与生产验收仍分别记录。M3 稳定 0.4.0 仍由独立门禁负责。

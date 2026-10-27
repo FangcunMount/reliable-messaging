@@ -1,6 +1,6 @@
 # RocketMQ 可读路由与历史证据
 
-本接口为新增能力，尚未发布或部署。Qlume 的实现、CI、发布与上线进度分别维护于 [infra 执行总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-readable-names-execution.md)。
+可读路由已包含在固定预发布 Go `v0.6.0-rc.1` / Python `0.5.0rc1` 中，两个 tag 对应同一源码 `5c2e3cd155e67c0f766e93bf95238b16fc219b5f`，制品与安装证据见[发布索引](../releases/README.md)。稳定发布和生产部署尚未完成。Qlume 的实现、CI、发布与上线进度分别维护于 [infra 执行总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-readable-names-execution.md)。
 
 ## 规则与配置
 
@@ -22,4 +22,4 @@ Go 的 `PhysicalTopicV3` / `ConsumerGroupV3` 与 Python 的 `physical_topic_v3` 
 
 已提交结果从原证据读取，不能因改名再次执行。Prepared/Unknown不能Replan；只有存储原子证明前一执行及分支为Aborted，宿主明确给出新operation和完整candidate时，Replan才可授予新执行。SDK不自动生成新计划、不补做业务、不重放历史消息。跨路由候选可以保留原消息和wire，计划摘要须反映新operation/物理Topic；旧计划和终态不能被覆盖。
 
-真实Broker、原数据库事务、跨实例回查和生产迁移是独立门禁。当前单元测试证明codec、可信路由选择、预算和编排，不能代替真实依赖验收。
+真实Broker、原数据库事务、跨实例回查和生产迁移是独立门禁。固定预发布已通过两档公开Go/Python真实可读路由验收（各31项）、Broker退出恢复专项（5项）、三档真实存储验收（各29项）。跨路由Replan的原字节与编排由单元测试证明，存储终态CAS另有真实数据库测试；这些范围分别记录，不能据此宣称宿主完整切换或生产验收完成。
