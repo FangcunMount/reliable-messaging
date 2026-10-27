@@ -104,7 +104,7 @@ func consume(c config, tlsConfig *tls.Config, shared bool) error {
 	return errors.Join(err, closeErr)
 }
 func normal(c config, tlsConfig *tls.Config, id string) error {
-	publisher, err := rocketmq.NewPublisher(rocketmq.Config{Endpoint: c.Endpoint, AccessKey: c.AccessKey, SecretKey: c.SecretKey, TLS: tlsConfig, Routes: []transport.RouteBinding{{Topic: "sdk.logical", PhysicalTopic: c.Topic, MessageType: transport.NormalMessageType, Owner: c.Owner, RouteRevision: c.Revision}}, RequestTimeout: 5 * time.Second, MaxInFlight: 2})
+	publisher, err := rocketmq.NewPublisher(rocketmq.Config{Endpoint: c.Endpoint, AccessKey: c.AccessKey, SecretKey: c.SecretKey, TLS: tlsConfig, Routes: c.Inputs, RequestTimeout: 5 * time.Second, MaxInFlight: 2})
 	if err != nil {
 		return err
 	}
