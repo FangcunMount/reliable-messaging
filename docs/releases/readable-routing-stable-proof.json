@@ -169,5 +169,20 @@
     "first_assets_redownloaded": 12,
     "appended_installation_assets": 6,
     "all_github_asset_digests_equal_local_files": true
+  },
+  "post_release_documentation_ci": {
+    "failed_source_sha": "71259ef56e6a8fadd189cb9bea7fc298225396fa",
+    "run_id": 40629147482,
+    "job_id": 122621155086,
+    "case": "TestProducerSettingsSnapshotsReachActualTLSStream",
+    "actual_remote_commands": 198,
+    "expected_minimum": 200,
+    "cause": "Fixture closed the producer after local stream.Send completion without waiting for the real TLS peer to receive all commands",
+    "correction": "Test-only per-producer counter barrier waits for50 additional remote observations before shutdown; preserves all200 exchanges, TLS, race coverage and finite deadlines",
+    "runtime_or_published_assets_changed": false,
+    "local_go_1_25_12_race_repetitions": 20,
+    "make_check": "passed",
+    "local_go_1_25_9_race_repetitions": 20,
+    "local_initial_environment_refusal": "Inherited GOROOT pointed to1.25.12 when invoking1.25.9; compilation refused before tests. Corrected per-command GOROOT, without changing global settings."
   }
 }
