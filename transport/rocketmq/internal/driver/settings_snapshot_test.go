@@ -100,6 +100,7 @@ func TestProducerSettingsConcurrentUpdateAndMarshal(t *testing.T) {
 type settingsSnapshotServer struct {
 	boundedTransactionServer
 	commands atomic.Int32
+	observed chan struct{}
 }
 
 func (s *settingsSnapshotServer) Telemetry(stream v2.MessagingService_TelemetryServer) error {
@@ -108,6 +109,10 @@ func (s *settingsSnapshotServer) Telemetry(stream v2.MessagingService_TelemetryS
 			return err
 		}
 		n := s.commands.Add(1)
+		select {
+		case s.observed <- struct{}{}:
+		default:
+		}
 		if err := stream.Send(&v2.TelemetryCommand{Command: &v2.TelemetryCommand_Settings{
 			Settings: serverProducerSettings(n%5 + 1)}}); err != nil {
 			return err
@@ -127,7 +132,7 @@ func TestProducerSettingsSnapshotsReachActualTLSStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := &settingsSnapshotServer{boundedTransactionServer: boundedTransactionServer{endpoint: endpoint}}
+	service := &settingsSnapshotServer{boundedTransactionServer: boundedTransactionServer{endpoint: endpoint}, observed: make(chan struct{}, 1)}
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})))
 	v2.RegisterMessagingServiceServer(server, service)
 	go server.Serve(listener)
@@ -155,12 +160,27 @@ func TestProducerSettingsSnapshotsReachActualTLSStream(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// A successful stream.Send only proves the local write. Keep this
+		// producer alive until the TLS peer has actually observed the commands;
+		// stopping immediately can cancel the last frames before peer delivery.
+		target := service.commands.Load() + 50
 		for i := 0; i < 50; i++ {
 			if err = p.cli.telemeter(listener.Addr().String(), p.cli.getSettingsCommand()); err != nil {
 				_ = p.GracefulStop()
 				t.Fatal(err)
 			}
 		}
+		observed, stopWaiting := context.WithTimeout(context.Background(), 3*time.Second)
+		for service.commands.Load() < target {
+			select {
+			case <-service.observed:
+			case <-observed.Done():
+				stopWaiting()
+				_ = p.GracefulStop()
+				t.Fatalf("TLS peer observed %d telemetry commands; need %d before shutdown", service.commands.Load(), target)
+			}
+		}
+		stopWaiting()
 		if err = p.GracefulStop(); err != nil {
 			t.Fatal(err)
 		}
