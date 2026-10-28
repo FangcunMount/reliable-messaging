@@ -1,0 +1,173 @@
+{
+  "schema": "readable-published-stable-sdk-installation/v1",
+  "source_sha": "559c735b2ceb11827ffbbd1279808b4164bba3d1",
+  "verified_at": "2026-10-28T03:47:33.526387+00:00",
+  "downloads": {
+    "schema": "readable-stable-published-downloads/v1",
+    "source_sha": "559c735b2ceb11827ffbbd1279808b4164bba3d1",
+    "releases": [
+      {
+        "tag": "v0.6.0",
+        "source_sha": "559c735b2ceb11827ffbbd1279808b4164bba3d1",
+        "release_id": 426240418,
+        "url": "https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.6.0",
+        "assets": {
+          "acceptance-summary.json": {
+            "sha256": "ed9710f141213fa993f073662d769a7ee17df73ca9e183561cc27cf01534439c",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/v0.6.0/acceptance-summary.json",
+            "asset_id": 683727606,
+            "bytes": 9619
+          },
+          "fangcun_reliable_messaging-0.5.0-py3-none-any.whl": {
+            "sha256": "6fe1fbf0635d3e2f8ba2f10c12474c39c939ee656f20df7784928f8bd92e88b8",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/v0.6.0/fangcun_reliable_messaging-0.5.0-py3-none-any.whl",
+            "asset_id": 683727613,
+            "bytes": 54138
+          },
+          "fangcun_reliable_messaging-0.5.0.tar.gz": {
+            "sha256": "4acbdddad91448d64993ec0b081b7064b64ce2a5248c75b40a67354109173821",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/v0.6.0/fangcun_reliable_messaging-0.5.0.tar.gz",
+            "asset_id": 683727608,
+            "bytes": 133269
+          },
+          "release-receipt.json": {
+            "sha256": "e76661a3e281343db2f51151bb90ce8e6421f8ed68170f1bf2d66d22bfe65149",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/v0.6.0/release-receipt.json",
+            "asset_id": 683727605,
+            "bytes": 847
+          },
+          "SHA256SUMS": {
+            "sha256": "cd832521fed5f6f22e1e3585df122a2bf39c2f09e54bee683a8164c9137328cc",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/v0.6.0/SHA256SUMS",
+            "asset_id": 683727637,
+            "bytes": 473
+          },
+          "uv.lock": {
+            "sha256": "24cfbf1517ba616da67dfe51db86da7b2eefc8ecfa470e21aa0005ec7f3699f6",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/v0.6.0/uv.lock",
+            "asset_id": 683727604,
+            "bytes": 156663
+          }
+        }
+      },
+      {
+        "tag": "python/v0.5.0",
+        "source_sha": "559c735b2ceb11827ffbbd1279808b4164bba3d1",
+        "release_id": 426240472,
+        "url": "https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.5.0",
+        "assets": {
+          "acceptance-summary.json": {
+            "sha256": "ed9710f141213fa993f073662d769a7ee17df73ca9e183561cc27cf01534439c",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/python/v0.5.0/acceptance-summary.json",
+            "asset_id": 683727768,
+            "bytes": 9619
+          },
+          "fangcun_reliable_messaging-0.5.0-py3-none-any.whl": {
+            "sha256": "6fe1fbf0635d3e2f8ba2f10c12474c39c939ee656f20df7784928f8bd92e88b8",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/python/v0.5.0/fangcun_reliable_messaging-0.5.0-py3-none-any.whl",
+            "asset_id": 683727767,
+            "bytes": 54138
+          },
+          "fangcun_reliable_messaging-0.5.0.tar.gz": {
+            "sha256": "4acbdddad91448d64993ec0b081b7064b64ce2a5248c75b40a67354109173821",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/python/v0.5.0/fangcun_reliable_messaging-0.5.0.tar.gz",
+            "asset_id": 683727771,
+            "bytes": 133269
+          },
+          "release-receipt.json": {
+            "sha256": "e76661a3e281343db2f51151bb90ce8e6421f8ed68170f1bf2d66d22bfe65149",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/python/v0.5.0/release-receipt.json",
+            "asset_id": 683727766,
+            "bytes": 847
+          },
+          "SHA256SUMS": {
+            "sha256": "cd832521fed5f6f22e1e3585df122a2bf39c2f09e54bee683a8164c9137328cc",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/python/v0.5.0/SHA256SUMS",
+            "asset_id": 683727815,
+            "bytes": 473
+          },
+          "uv.lock": {
+            "sha256": "24cfbf1517ba616da67dfe51db86da7b2eefc8ecfa470e21aa0005ec7f3699f6",
+            "url": "https://github.com/FangcunMount/reliable-messaging/releases/download/python/v0.5.0/uv.lock",
+            "asset_id": 683727770,
+            "bytes": 156663
+          }
+        }
+      }
+    ],
+    "two_tag_same_commit": true,
+    "six_assets_per_release_verified": true,
+    "github_digests_match": true,
+    "assets_identical_between_releases": true
+  },
+  "go": {
+    "schema": "readable-stable-published-go-install/v1",
+    "source_sha": "559c735b2ceb11827ffbbd1279808b4164bba3d1",
+    "module": "github.com/FangcunMount/reliable-messaging",
+    "version": "v0.6.0",
+    "sum": "h1:ncfphXuTE6JtSH9wJTxakZxkLxic4uws15L5dRvYrg0=",
+    "go_mod_sum": "h1:GPiWG8ZsX4pvIZ6QyvLnBVO5iCqNhvsnKwFcg0ftC7I=",
+    "official_tag": "refs/tags/v0.6.0",
+    "replace": false,
+    "workspace_import": false,
+    "source_files_equal": 193,
+    "passed": 62,
+    "failed": 0,
+    "skipped": 0,
+    "race": true,
+    "scope": [
+      "transaction",
+      "transport/rocketmq",
+      "wire/legacy"
+    ],
+    "native_integration": "separate exact-source CI receipt"
+  },
+  "python": {
+    "wheel": {
+      "schema": "readable-stable-published-python-install/v1",
+      "source_sha": "559c735b2ceb11827ffbbd1279808b4164bba3d1",
+      "kind": "wheel",
+      "asset": "fangcun_reliable_messaging-0.5.0-py3-none-any.whl",
+      "asset_sha256": "6fe1fbf0635d3e2f8ba2f10c12474c39c939ee656f20df7784928f8bd92e88b8",
+      "installed_version": "0.5.0",
+      "source_files_equal": 16,
+      "passed": 128,
+      "failed": 0,
+      "skipped": 0,
+      "integration_cases_explicitly_excluded": true,
+      "editable": false,
+      "workspace_sdk_import": false,
+      "formally_published": true,
+      "release_tag": "python/v0.5.0",
+      "download_verification_sha256": "2656b2e5d6c75ac7f85e49262dc9152f47020c8d8b2f9986d9213f36017f8109"
+    },
+    "sdist": {
+      "schema": "readable-stable-published-python-install/v1",
+      "source_sha": "559c735b2ceb11827ffbbd1279808b4164bba3d1",
+      "kind": "sdist",
+      "asset": "fangcun_reliable_messaging-0.5.0.tar.gz",
+      "asset_sha256": "4acbdddad91448d64993ec0b081b7064b64ce2a5248c75b40a67354109173821",
+      "installed_version": "0.5.0",
+      "source_files_equal": 16,
+      "passed": 128,
+      "failed": 0,
+      "skipped": 0,
+      "integration_cases_explicitly_excluded": true,
+      "editable": false,
+      "workspace_sdk_import": false,
+      "formally_published": true,
+      "release_tag": "python/v0.5.0",
+      "download_verification_sha256": "2656b2e5d6c75ac7f85e49262dc9152f47020c8d8b2f9986d9213f36017f8109"
+    }
+  },
+  "published_bytes_equal_validated_source": true,
+  "native_acceptance": "acceptance-summary.json attached at publication; real dependencies run on exact source before tag creation",
+  "runtime_deployment": false,
+  "business_acceptance": false,
+  "final_asset_verification": {
+    "release_assets": 18,
+    "first_assets_redownloaded": 12,
+    "appended_installation_assets": 6,
+    "all_github_asset_digests_equal_local_files": true
+  }
+}

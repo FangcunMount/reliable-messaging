@@ -4,11 +4,21 @@
 
 <!-- source-python-version: 0.5.0 -->
 
-## 可读资源命名稳定候选（2026-10-28）
+## 可读资源命名稳定版（2026-10-28）
 
-本分支将 Python 源码版本固定为 `0.5.0`，对应计划 Go `v0.6.0`；**两个稳定版本尚未发布**。已发布的固定预发布与证明继续见下节。该候选只修改版本、项目自身 lock 条目及说明；Go/Python 实现、schema、codec、客户端和依赖版本保持固定预发布的原字节。
+已发布 [Go v0.6.0](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.6.0) 和 [Python 0.5.0](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.5.0)，两个tag固定同一源码 `559c735b2ceb11827ffbbd1279808b4164bba3d1`。PR65合并；完整tree与候选8d99c8b一致，Go/Python实现、schema、codec、客户端及外部依赖与可读RC保持原字节。
 
-发布门禁包括：三库固定预发布的必需源码/真实宿主矩阵通过；本候选合并后取得精确 SHA；对该 SHA 重新执行源码、存储、真实 Broker 和独立 wheel/sdist 验证；发布前再次核对版本未占用。两个稳定 tag 绑定同一源码，不覆盖已有版本；发布后重新下载资产和安装验收。当前版本字段不能作为发布、宿主稳定依赖或生产上线证明。
+精确合并SHA的源码与隔离基础设施门禁通过；[Python两档源码和独立wheel](https://github.com/FangcunMount/reliable-messaging/actions/runs/40625815742)各159项，[存储三档](https://github.com/FangcunMount/reliable-messaging/actions/runs/40626058319)各29项，[真实readable SDK](https://github.com/FangcunMount/infra/actions/runs/40626062382)35/35/5项，[完整故障与有限回查](https://github.com/FangcunMount/infra/actions/runs/40626066814)两档各48项，必需报告非空、零失败/跳过，所属清理通过。未选择的独立native-index-audit不计入该轮门禁。
+
+两个正式Release各9项资产，18项服务器摘要均核对；首发12项重新下载并逐字节比较，后附6项安装证明独立追加、不替换原始资产。正式Go模块193份选定源码/模块文件相同，62项纯race测试通过，无replace；正式下载的wheel/sdist分别在独立site-packages安装，各128项纯测试、16份实现文件一致，无editable或工作区SDK导入。真实依赖未在MacBook启动，由上述精确源码CI负责。完整摘要与边界见[发布安装证明](readable-routing-stable-proof.json)。
+
+| 制品 | SHA256 / module sum |
+|---|---|
+| wheel | `6fe1fbf0635d3e2f8ba2f10c12474c39c939ee656f20df7784928f8bd92e88b8` |
+| sdist | `4acbdddad91448d64993ec0b081b7064b64ce2a5248c75b40a67354109173821` |
+| Go module | `h1:ncfphXuTE6JtSH9wJTxakZxkLxic4uws15L5dRvYrg0=` |
+
+本次仅证明SDK固定发布；三库稳定依赖、最终镜像及生产system验收分别由[唯一执行总表](https://github.com/FangcunMount/infra/blob/main/docs/server/rocketmq-readable-names-execution.md)记录。GitHub Release分发，不新增PyPI，不移动已发布tag或覆盖资产。
 
 ## 可读资源命名固定预发布（2026-10-27）
 
