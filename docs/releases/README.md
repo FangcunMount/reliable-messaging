@@ -4,6 +4,16 @@
 
 <!-- source-python-version: 0.5.0 -->
 
+## Go 接收输入轮转修正版（2026-10-30）
+
+已发布 [Go v0.6.1](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.6.1)，tag 固定源码 `48dfcdafbf29b44e99a5ac8b1ae01e5173138560`，经 PR67 合并至 `98289de6588fa85dc2032df154fb60458fef6011`，完整 tree 一致。SimpleConsumer 先固定物理 topic 顺序，再应用既有轮转游标；保持消息身份、首次 wire、事务归属、容量与可见期续租契约。Python 仍为 0.5.0，本次不重新发布。
+
+精确源码及合并提交的源码/隔离基础设施 CI 通过。真实 SDK complete 两档各48项、readable 两档各35项和存活 Producer 恢复5项通过；这些是固定源码的集成结果。QS 还需要宿主自己的有界租约等待修正：源候选的原 M3-C 14项通过，原失败与7次锁竞争/第8次死信证据保留。正式依赖的宿主最终复验另行记录，不能沿用源候选结果代替。
+
+正式下载 Go 模块无 replace，来源 SHA 与 tag 一致，201份选定源码/契约/模块文件逐字节相同，三个纯 race 包76项（含子测试）零失败/跳过，38份 Apache 原始源码补丁重放通过。模块 sum 为 `h1:mHj1tReMGHu979OuC/XhFAk13dxsgqTDygZs2WdqVwY=`。首次官方代理版本查询命中缓存404，标准 Go 代理与 VCS fallback 成功且保留默认 sumdb 验证；没有修改模块缓存或全局工具配置。
+
+Go 使用不可变 tag 分发。Release 资产上传返回401后初始草稿已回滚，正式 Go Release 通过支持的 API 发布，未附二进制或 receipt 资产；完整[发布安装证明](go-input-rotation-v0.6.1-proof.json)保存在本仓库。没有服务部署或现有存储操作，不能视作生产切换验收。
+
 ## 可读资源命名稳定版（2026-10-28）
 
 已发布 [Go v0.6.0](https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.6.0) 和 [Python 0.5.0](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.5.0)，两个tag固定同一源码 `559c735b2ceb11827ffbbd1279808b4164bba3d1`。PR65合并；完整tree与候选8d99c8b一致，Go/Python实现、schema、codec、客户端及外部依赖与可读RC保持原字节。

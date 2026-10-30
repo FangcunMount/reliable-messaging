@@ -1,0 +1,363 @@
+{
+  "version": 1,
+  "scope": "exact source and source-candidate acceptance; post-release installation recorded separately",
+  "go_tag": "v0.6.1",
+  "tag_target_sha": "48dfcdafbf29b44e99a5ac8b1ae01e5173138560",
+  "main_merge_sha": "98289de6588fa85dc2032df154fb60458fef6011",
+  "same_source_tree": true,
+  "source_tree": "575252e9e4e25f098e7e607448ebcf94d5ae8714",
+  "sdk_source_ci": [
+    41007526289,
+    41007526342
+  ],
+  "sdk_complete_native": [
+    {
+      "artifact": 12956319985,
+      "archive": "rocketmq-complete-sdk-1-f530241beb7b3382757fce099db560c67af39097-41007538754.zip",
+      "sha256": "7b11cb8ba80759bbd5defcfadaa3f65e33d5ca19b0902b2fce798a7a3e21eaff",
+      "go": "go1.25.12",
+      "counts": [
+        48,
+        0,
+        0
+      ],
+      "cases": {
+        "v2_go_python_infra_exact_route_vectors": true,
+        "v2_existing_type_conflict_refuses_all_resource_mutations": true,
+        "v2_idempotent_typed_resources_and_minimum_owner_acls": true,
+        "v2_existing_configuration_conflict_refused": true,
+        "v2_sdk-go_wrong_owner_broker_denied_without_business": true,
+        "v2_sdk-python_wrong_owner_broker_denied_without_business": true,
+        "public_go_mysql_half_then_commit": true,
+        "public_go_mysql_half_then_rollback": true,
+        "public_go_mysql_new_instance_crash-committed": true,
+        "public_go_mysql_new_instance_crash-prepared": true,
+        "public_go_untrusted_ca_startup_really_drained": true,
+        "public_go_same_process_client_isolation": true,
+        "public_go_real_database_outage_unknown_then_recovery": true,
+        "public_go_mysql_exact_business_and_wire_set": true,
+        "public_go_mongo_half_then_commit": true,
+        "public_go_mongo_half_then_rollback": true,
+        "public_go_mongo_new_instance_crash-committed": true,
+        "public_go_mongo_new_instance_crash-prepared": true,
+        "public_go_mongo_exact_business_and_wire_set": true,
+        "public_python_half_then_commit": true,
+        "public_python_half_then_rollback": true,
+        "public_sdk-python_to_sdk-python_crash-committed": true,
+        "public_sdk-python_to_sdk-python_crash-prepared": true,
+        "public_sdk-go_to_sdk-python_crash-committed": true,
+        "public_sdk-python_to_sdk-go_crash-committed": true,
+        "public_python_real_database_outage_unknown_then_recovery": true,
+        "public_python_untrusted_ca_startup_really_drained": true,
+        "public_python_same_process_client_isolation": true,
+        "public_python_cross_language_exact_business_and_wire_set": true,
+        "v2_sdk-go_three_physical_inputs_share_two_handler_budget": true,
+        "v2_sdk-python_three_physical_inputs_share_two_handler_budget": true,
+        "public_sdk-go_mysql_real_database_commit_before_tcp_loss": true,
+        "public_sdk-go_mysql_real_database_commit_after_tcp_loss": true,
+        "public_sdk-go_mongo_real_database_commit_before_tcp_loss": true,
+        "public_sdk-go_mongo_real_database_commit_after_tcp_loss": true,
+        "public_sdk-python_mysql_real_database_commit_before_tcp_loss": true,
+        "public_sdk-python_mysql_real_database_commit_after_tcp_loss": true,
+        "public_sdk-go_sendmessage_after_real_broker_ack_tcp_loss": true,
+        "public_sdk-go_endtransaction_after_real_broker_ack_tcp_loss": true,
+        "public_sdk-go_partial_half_sigkill_new_instance_rollback": true,
+        "public_sdk-python_sendmessage_after_real_broker_ack_tcp_loss": true,
+        "public_sdk-python_endtransaction_after_real_broker_ack_tcp_loss": true,
+        "public_sdk-python_partial_half_sigkill_new_instance_rollback": true,
+        "public_sdk-go_mysql_producer_exit_broker_restart_new_checker": true,
+        "public_sdk-go_mongo_producer_exit_broker_restart_new_checker": true,
+        "public_sdk-python_mysql_producer_exit_broker_restart_new_checker": true,
+        "public_sdk-go_native_limit_unknown_private_audit_and_admission_alarm": true,
+        "public_sdk-python_native_limit_unknown_private_audit_and_admission_alarm": true
+      },
+      "cleanup": {
+        "project_containers_remaining": false,
+        "compose_down_succeeded": true,
+        "probe_process_groups_drained": true,
+        "private_fixture_directory_removed": true
+      },
+      "source_clean": true,
+      "sdk": "48dfcdafbf29b44e99a5ac8b1ae01e5173138560"
+    },
+    {
+      "artifact": 12957360043,
+      "archive": "rocketmq-complete-sdk-0-f530241beb7b3382757fce099db560c67af39097-41007538754.zip",
+      "sha256": "057ffd1a5b1454e0cfa5684c8e4cb491033fcd0f45a1b0bc9e7926c0af0bc811",
+      "go": "go1.25.9",
+      "counts": [
+        48,
+        0,
+        0
+      ],
+      "cases": {
+        "v2_go_python_infra_exact_route_vectors": true,
+        "v2_existing_type_conflict_refuses_all_resource_mutations": true,
+        "v2_idempotent_typed_resources_and_minimum_owner_acls": true,
+        "v2_existing_configuration_conflict_refused": true,
+        "v2_sdk-go_wrong_owner_broker_denied_without_business": true,
+        "v2_sdk-python_wrong_owner_broker_denied_without_business": true,
+        "public_go_mysql_half_then_commit": true,
+        "public_go_mysql_half_then_rollback": true,
+        "public_go_mysql_new_instance_crash-committed": true,
+        "public_go_mysql_new_instance_crash-prepared": true,
+        "public_go_untrusted_ca_startup_really_drained": true,
+        "public_go_same_process_client_isolation": true,
+        "public_go_real_database_outage_unknown_then_recovery": true,
+        "public_go_mysql_exact_business_and_wire_set": true,
+        "public_go_mongo_half_then_commit": true,
+        "public_go_mongo_half_then_rollback": true,
+        "public_go_mongo_new_instance_crash-committed": true,
+        "public_go_mongo_new_instance_crash-prepared": true,
+        "public_go_mongo_exact_business_and_wire_set": true,
+        "public_python_half_then_commit": true,
+        "public_python_half_then_rollback": true,
+        "public_sdk-python_to_sdk-python_crash-committed": true,
+        "public_sdk-python_to_sdk-python_crash-prepared": true,
+        "public_sdk-go_to_sdk-python_crash-committed": true,
+        "public_sdk-python_to_sdk-go_crash-committed": true,
+        "public_python_real_database_outage_unknown_then_recovery": true,
+        "public_python_untrusted_ca_startup_really_drained": true,
+        "public_python_same_process_client_isolation": true,
+        "public_python_cross_language_exact_business_and_wire_set": true,
+        "v2_sdk-go_three_physical_inputs_share_two_handler_budget": true,
+        "v2_sdk-python_three_physical_inputs_share_two_handler_budget": true,
+        "public_sdk-go_mysql_real_database_commit_before_tcp_loss": true,
+        "public_sdk-go_mysql_real_database_commit_after_tcp_loss": true,
+        "public_sdk-go_mongo_real_database_commit_before_tcp_loss": true,
+        "public_sdk-go_mongo_real_database_commit_after_tcp_loss": true,
+        "public_sdk-python_mysql_real_database_commit_before_tcp_loss": true,
+        "public_sdk-python_mysql_real_database_commit_after_tcp_loss": true,
+        "public_sdk-go_sendmessage_after_real_broker_ack_tcp_loss": true,
+        "public_sdk-go_endtransaction_after_real_broker_ack_tcp_loss": true,
+        "public_sdk-go_partial_half_sigkill_new_instance_rollback": true,
+        "public_sdk-python_sendmessage_after_real_broker_ack_tcp_loss": true,
+        "public_sdk-python_endtransaction_after_real_broker_ack_tcp_loss": true,
+        "public_sdk-python_partial_half_sigkill_new_instance_rollback": true,
+        "public_sdk-go_mysql_producer_exit_broker_restart_new_checker": true,
+        "public_sdk-go_mongo_producer_exit_broker_restart_new_checker": true,
+        "public_sdk-python_mysql_producer_exit_broker_restart_new_checker": true,
+        "public_sdk-go_native_limit_unknown_private_audit_and_admission_alarm": true,
+        "public_sdk-python_native_limit_unknown_private_audit_and_admission_alarm": true
+      },
+      "cleanup": {
+        "project_containers_remaining": false,
+        "compose_down_succeeded": true,
+        "probe_process_groups_drained": true,
+        "private_fixture_directory_removed": true
+      },
+      "source_clean": true,
+      "sdk": "48dfcdafbf29b44e99a5ac8b1ae01e5173138560"
+    }
+  ],
+  "sdk_readable_native": [
+    {
+      "artifact": 12956367456,
+      "archive": "rocketmq-readable-0-f530241beb7b3382757fce099db560c67af39097-41007554015.zip",
+      "sha256": "3d17fb9281ed78294041014292ff717ae95f3902ceab72a896bdf31d00ffca19",
+      "counts": [
+        35,
+        0,
+        0
+      ],
+      "go": "go1.25.9",
+      "sdk": "48dfcdafbf29b44e99a5ac8b1ae01e5173138560",
+      "source_clean": true,
+      "cleanup": {
+        "project_containers_remaining": false,
+        "compose_down_succeeded": true,
+        "probe_process_groups_drained": true,
+        "private_fixture_directory_removed": true
+      }
+    },
+    {
+      "artifact": 12956008167,
+      "archive": "rocketmq-readable-1-f530241beb7b3382757fce099db560c67af39097-41007554015.zip",
+      "sha256": "8bb3236f9af4b0afc223dd2d6ede015be669ae03eeed2d2ddf5af9c9cf2eb75a",
+      "counts": [
+        35,
+        0,
+        0
+      ],
+      "go": "go1.25.12",
+      "sdk": "48dfcdafbf29b44e99a5ac8b1ae01e5173138560",
+      "source_clean": true,
+      "cleanup": {
+        "project_containers_remaining": false,
+        "compose_down_succeeded": true,
+        "probe_process_groups_drained": true,
+        "private_fixture_directory_removed": true
+      }
+    }
+  ],
+  "sdk_live_recovery": {
+    "run": 41007554015,
+    "artifact": 12956910626,
+    "counts": [
+      5,
+      0,
+      0
+    ]
+  },
+  "host_candidate_m3c": {
+    "run": 41013210155,
+    "artifact": 12959177516,
+    "archive": "fixed-candidate-native-41013210155.zip",
+    "sha256": "11f600ac32b325c48d2cba5760b1a98bd3dd388af86d923d6f7c8b7780516dd6",
+    "source": "ff7fa76b0489976fe740e2b80702203de1b37b5f",
+    "module": {
+      "Path": "github.com/FangcunMount/reliable-messaging",
+      "Version": "v0.6.1-0.20261030051625-48dfcdafbf29",
+      "Sum": "h1:CrZw7SsuU96qiSSY1p0ta+XYPjbaG9sdLA2+9OlmFM8=",
+      "GoModSum": "h1:GPiWG8ZsX4pvIZ6QyvLnBVO5iCqNhvsnKwFcg0ftC7I="
+    },
+    "counts": [
+      14,
+      0,
+      0
+    ],
+    "gate_wait_checked": true,
+    "gates": [
+      {
+        "worker": "first",
+        "counts": {
+          "contention_retry": 0,
+          "ensure_failed": 0,
+          "processed": 0,
+          "wait_cancelled": 0,
+          "wait_completed": 0,
+          "wait_exhausted": 0,
+          "wait_started": 0
+        },
+        "truncated": false
+      },
+      {
+        "worker": "replacement",
+        "counts": {
+          "contention_retry": 0,
+          "ensure_failed": 0,
+          "processed": 1,
+          "wait_cancelled": 0,
+          "wait_completed": 1,
+          "wait_exhausted": 0,
+          "wait_started": 1
+        },
+        "truncated": false
+      }
+    ],
+    "receipt": {
+      "api_lease_recovery_drained": true,
+      "api_lease_recovery_started": true,
+      "broker_sigkill": true,
+      "cases": {
+        "actual_original_wire_redelivery_after_restart": true,
+        "answersheet_operator_original_request_response_loss": true,
+        "closed_or_changed_task_refuses_new_send": true,
+        "conflicting_source_refuses_whole_rebuild": true,
+        "frozen_reminder_recipients_survive_recovery": true,
+        "known_reminder_original_receipt_no_repeat": true,
+        "late_original_delivery_preserves_rank_and_notification_counts": true,
+        "one_assessment_run_outcome_and_report": true,
+        "original_transaction_roots_without_relay": true,
+        "real_redis_current_day_cli_rebuild_and_repeat": true,
+        "receipts_readable_with_writes_disabled": true,
+        "same_owned_broker_sigkill_restart": true,
+        "unknown_provider_response_never_resends": true,
+        "worker_sigkill_after_effect_before_ack": true
+      },
+      "controlled_provider": true,
+      "failed": 0,
+      "no_existing_storage": true,
+      "no_production": true,
+      "owned_databases_dropped": true,
+      "passed": 14,
+      "processing_lease_observed": true,
+      "processing_lease_ttl_ms": 291430,
+      "proxy_routes_checked": 5,
+      "proxy_routes_ready": true,
+      "real_redis": true,
+      "report_claim_observed": true,
+      "report_lease_ttl_ms": 299995,
+      "skipped": 0,
+      "source_sha": "ff7fa76b0489976fe740e2b80702203de1b37b5f",
+      "worker_pids_distinct": true,
+      "worker_sigkill": true
+    },
+    "cleanup": {
+      "project_containers_remaining": false,
+      "compose_down_succeeded": true,
+      "probe_process_groups_drained": true,
+      "private_fixture_directory_removed": true
+    }
+  },
+  "prior_failure_control": {
+    "run": 41012221934,
+    "artifact": 12958269314,
+    "counts": [
+      0,
+      1,
+      0
+    ],
+    "contention_retries": 7,
+    "terminal_delivery_attempt": 8
+  },
+  "python_republished": false,
+  "production_deployed": false,
+  "existing_storage_operated": false,
+  "main_merge_ci": [
+    {
+      "run": 41015279606,
+      "successful_jobs": 4
+    },
+    {
+      "run": 41015279620,
+      "successful_jobs": 1
+    }
+  ],
+  "recorded_at": "2026-10-30",
+  "release": {
+    "id": 428725252,
+    "url": "https://github.com/FangcunMount/reliable-messaging/releases/tag/v0.6.1",
+    "draft": false,
+    "prerelease": false,
+    "binary_assets": 0
+  },
+  "installed_module": {
+    "version": "v0.6.1",
+    "sum": "h1:mHj1tReMGHu979OuC/XhFAk13dxsgqTDygZs2WdqVwY=",
+    "go_mod_sum": "h1:GPiWG8ZsX4pvIZ6QyvLnBVO5iCqNhvsnKwFcg0ftC7I=",
+    "origin_sha": "48dfcdafbf29b44e99a5ac8b1ae01e5173138560",
+    "replace": false,
+    "matching_selected_files": 201,
+    "fetch": "standard Go official-proxy,VCS fallback with default sum.golang.org verification; network proxy preserved",
+    "race": {
+      "version": "v0.6.1",
+      "source_sha": "48dfcdafbf29b44e99a5ac8b1ae01e5173138560",
+      "module_sum": "h1:mHj1tReMGHu979OuC/XhFAk13dxsgqTDygZs2WdqVwY=",
+      "exit": 0,
+      "results_including_subtests": {
+        "pass": 76,
+        "fail": 0,
+        "skip": 0
+      },
+      "workspace_sdk_import": false,
+      "replace": false
+    },
+    "apache_source_patch_replay_files": 38,
+    "apache_source_patch_replay_exit": 0
+  },
+  "distribution_limit": {
+    "release_asset_upload": "uploads.github.com returned HTTP 401; CLI rolled back initial draft; published Go-only Release through supported GitHub API without binary assets",
+    "receipts": "versioned repository documentation; no assertion of uploaded receipt assets",
+    "proxy_cache": "version-specific official proxy info initially cached 404; normal GOPROXY=https://proxy.golang.org,direct succeeded with default sumdb verification; no module-cache edits"
+  },
+  "stable_host_final_verification": {
+    "status": "running at time of SDK receipt",
+    "run": 41016595348,
+    "qs": "e3039b867b0b6872183111e1fff02ebfe64209a6",
+    "iam": "f96f87f163004d9926d5c4b2724fe7e876d7aca9",
+    "infra": "ceceb97bf990bfc15a446427ec67e122e0c1779d",
+    "frozen_worker_control": "8dbb4291b4e730f1741818ac6d26efa98a507204",
+    "scope": "separate from already accepted source-candidate M3-C14; not production acceptance"
+  }
+}
