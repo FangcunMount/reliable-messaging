@@ -47,7 +47,8 @@
     "transaction-runtime.patch",
     "settings-snapshot.patch",
     "meter-snapshot.patch",
-    "recovery-receipt.patch"
+    "recovery-receipt.patch",
+    "stable-input-rotation.patch"
   ],
   "patched_sha256": {
     "client.go": "5fcf31e8d9b895cb8fce3f36e1a29b008716b77cafb5427c2ab996a72d598a4b",
@@ -82,7 +83,7 @@
     "rpc_client.go": "2a3b6fbcead76c2783eec328ae2a5780ce764cf84bffbadb33c5abfa9377f326",
     "rpc_client_mock.go": "4c8c6d6af3576fe62824f9759948f5a85dde38ee5c7148c7f81e6a0d04006619",
     "rpc_client_options.go": "485f4368467c18a31344318f60d98dde43f2044d4493192857ec6f53459705d8",
-    "simple_consumer.go": "56956743825905af9526a955bb52d3945a2abb796713e6aa9107b25a205073a1",
+    "simple_consumer.go": "16760d5e44954273db3b13d41b72084d230094a9ee76e2167025d9d9f9b7ffcd",
     "simple_consumer_options.go": "d24c4def53f00b324eb4cea6d498d87e2127f0f65d20ce1e0c48a116aca88f72",
     "simple_thread_pool.go": "f6e3ec76238822539484d9c0c96b3761741d8adf979f6bf46616012dcf42bd64",
     "trace.go": "1a480254170cb1d09533ce00e6e696d6868189e560115d5108a28dd8efb3cdf9",

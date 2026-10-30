@@ -1,0 +1,8 @@
+--- a/simple_consumer.go
++++ b/simple_consumer.go
+@@ -23,0 +24 @@
++	"sort"
+@@ -304,0 +306,3 @@
++	// A cursor requires a stable ordering while subscriptions are unchanged.
++	// Re-enumerating a map can otherwise select the same input every rotation.
++	sort.Strings(topics)
