@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"time"
 
@@ -302,6 +303,9 @@ func (sc *defaultSimpleConsumer) Receive(ctx context.Context, maxMessageNum int3
 	if len(topics) == 0 {
 		return nil, fmt.Errorf("there is no topic to receive message")
 	}
+	// A cursor requires a stable ordering while subscriptions are unchanged.
+	// Re-enumerating a map can otherwise select the same input every rotation.
+	sort.Strings(topics)
 	next := sc.topicIndex.Inc()
 	idx := utils.Mod(next+1, len(topics))
 	topic := topics[idx]
