@@ -26,6 +26,11 @@ class Unavailable(RpcError):  # type: ignore[misc]
         return StatusCode.UNAVAILABLE
 
 
+class DeadlineExceeded(RpcError):  # type: ignore[misc]
+    def code(self) -> StatusCode:
+        return StatusCode.DEADLINE_EXCEEDED
+
+
 def configuration() -> Config:
     topic, subscription = "qs.ai.events.v1", "qs-server.ai-events.v1"
     route = RouteBinding(
@@ -278,9 +283,10 @@ async def test_receive_reregisters_after_proxy_session_loss(
     assert calls[-1] == "new_shutdown"
 
 
+@pytest.mark.parametrize("rpc_error", [Unavailable, DeadlineExceeded])
 @pytest.mark.parametrize("disconnect_during", ["ack", "renew", "retry"])
 async def test_in_flight_session_loss_redelivers_with_current_receipt(
-    monkeypatch: pytest.MonkeyPatch, disconnect_during: str
+    monkeypatch: pytest.MonkeyPatch, disconnect_during: str, rpc_error: type[RpcError]
 ) -> None:
     config = configuration()
     route = config.routes[0]
@@ -312,12 +318,12 @@ async def test_in_flight_session_loss_redelivers_with_current_receipt(
     def old_ack(raw: object) -> None:
         assert disconnect_during == "ack"
         order.append(("old-ack-lost", raw))
-        raise Unavailable()
+        raise rpc_error()
 
     def old_visibility(raw: object, duration: int) -> None:
         assert disconnect_during in ("renew", "retry")
         order.append(("old-visibility-lost", raw))
-        raise Unavailable()
+        raise rpc_error()
 
     def new_ack(raw: object) -> None:
         order.append(("new-ack", raw))
@@ -407,6 +413,105 @@ async def test_repeated_receive_failure_spends_one_recovery_budget(
         assert starts == shutdowns == 3
     finally:
         await subscriber.stop()
+
+
+async def test_repeated_ack_failure_spends_budget_even_with_successful_receives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = configuration()
+    route = config.routes[0]
+    starts = 0
+    attempts: list[int] = []
+
+    def register() -> None:
+        nonlocal starts
+        starts += 1
+        attempt = starts
+        raw = SimpleNamespace(
+            topic=route.physical_topic,
+            corrupted=False,
+            body=encode(Envelope("preserved-id", b"original")),
+            delivery_attempt=attempt,
+            born_timestamp=123,
+            message_id="same-broker-message",
+        )
+        batches = iter(([], [raw]))
+
+        def ack(message: Any) -> None:
+            assert message is raw
+            attempts.append(attempt)
+            raise Unavailable()
+
+        subscriber._driver.client = SimpleNamespace(
+            receive=lambda *_: next(batches), ack=ack, shutdown=lambda: None
+        )
+
+    subscriber = RocketMQSubscriber(
+        config,
+        route.topic,
+        route.subscription,
+        handler=AsyncMock(),
+        failed_handler=AsyncMock(),
+        invalid_handler=AsyncMock(),
+    )
+    monkeypatch.setattr("reliable_messaging.rocketmq._RECOVERY_DELAYS", (0, 0))
+    monkeypatch.setattr(subscriber, "_start_consumer", register)
+    await subscriber.start()
+    try:
+        with pytest.raises(RuntimeError) as reported:
+            await asyncio.wait_for(subscriber.wait(), 0.2)
+        exhausted = reported.value.__cause__
+        assert exhausted is not None and "session recovery exhausted" in str(exhausted)
+        assert isinstance(exhausted.__cause__, Unavailable)
+        assert starts == 3 and attempts == [1, 2, 3]
+    finally:
+        await subscriber.stop()
+
+
+async def test_handler_budget_cannot_overlap_ack_with_visibility_change() -> None:
+    config = configuration()
+    route = config.routes[0]
+    entered, release = threading.Event(), threading.Event()
+    visibility_calls: list[object] = []
+
+    def ack(message: object) -> None:
+        entered.set()
+        assert release.wait(5)
+
+    subscriber = RocketMQSubscriber(
+        config,
+        route.topic,
+        route.subscription,
+        handler=AsyncMock(),
+        failed_handler=AsyncMock(),
+        invalid_handler=AsyncMock(),
+        handler_timeout=0.15,
+    )
+    subscriber._driver.begin()
+    subscriber._driver.client = SimpleNamespace(
+        ack=ack,
+        change_invisible_duration=lambda raw, duration: visibility_calls.append(raw),
+        shutdown=lambda: None,
+    )
+    raw = SimpleNamespace(
+        topic=route.physical_topic,
+        corrupted=False,
+        body=encode(Envelope("preserved-id", b"original")),
+        delivery_attempt=1,
+        born_timestamp=123,
+        message_id="same-broker-message",
+    )
+    task = asyncio.create_task(subscriber._handle(raw))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(task), 0.2)
+        assert not visibility_calls
+    finally:
+        release.set()
+        await task
+        await subscriber.stop()
+    assert not visibility_calls
 
 
 async def test_stop_retry_does_not_shutdown_same_client_twice() -> None:

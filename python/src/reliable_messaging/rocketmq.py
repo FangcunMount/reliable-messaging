@@ -23,13 +23,16 @@ logger = logging.getLogger(__name__)
 _RECOVERY_DELAYS = (0, 1, 2, 4, 8, 8, 8)
 
 
-def _consumer_session_lost(error: Exception) -> bool:
+def _consumer_session_lost(error: Exception, *, receipt_operation: bool = False) -> bool:
     from grpc import RpcError, StatusCode  # type: ignore[import-untyped]
     from rocketmq.grpc_protocol import Code  # type: ignore[import-untyped]
     from rocketmq.v5.exception import InternalErrorException  # type: ignore[import-untyped]
 
     if isinstance(error, RpcError):
-        return error.code() == StatusCode.UNAVAILABLE
+        status = error.code()
+        return status == StatusCode.UNAVAILABLE or (
+            receipt_operation and status == StatusCode.DEADLINE_EXCEEDED
+        )
     # RocketMQ 5.5.1 reports an absent Proxy registration as an internal error.
     return (
         isinstance(error, InternalErrorException)
@@ -274,6 +277,8 @@ class RocketMQSubscriber:
         self._failure: asyncio.Future[None] | None = None
         self._failure_error: BaseException | None = None
         self._session_error: Exception | None = None
+        self._receipt_recovery = False
+        self._recovery_delays: Iterator[int] = iter(_RECOVERY_DELAYS)
 
     def _start_consumer(self) -> None:
         from rocketmq.v5.client import (  # type: ignore[import-untyped]
@@ -325,7 +330,7 @@ class RocketMQSubscriber:
             await self._driver.close(self.config.timeout + 5)
             raise
 
-    async def _recover_consumer(self, error: Exception, delays: Iterator[int]) -> None:
+    async def _recover_consumer(self, error: Exception) -> None:
         # Old receipts and any still-running driver calls belong to the old session.
         if self._tasks:
             await asyncio.shield(asyncio.gather(*self._tasks, return_exceptions=True))
@@ -335,7 +340,7 @@ class RocketMQSubscriber:
         await self._driver.call(self._driver.shutdown_client)
         logger.warning("RocketMQ consumer lost its session; restoring consumer settings")
         last_error = error
-        for delay in delays:
+        for delay in self._recovery_delays:
             if delay:
                 await asyncio.sleep(delay)
             try:
@@ -355,11 +360,11 @@ class RocketMQSubscriber:
 
     async def _poll(self) -> None:
         assert self._slots is not None
-        delays = iter(_RECOVERY_DELAYS)
+        self._recovery_delays = iter(_RECOVERY_DELAYS)
         try:
             while not self._driver.closing and self._failure_error is None:
                 if self._session_error is not None:
-                    await self._recover_consumer(self._session_error, delays)
+                    await self._recover_consumer(self._session_error)
                     continue
                 await self._slots.acquire()
                 if self._session_error is not None or self._failure_error is not None:
@@ -374,20 +379,18 @@ class RocketMQSubscriber:
                     if not isinstance(error, Exception) or not self._record_session_loss(error):
                         raise
                     continue
-                if (
-                    not messages
-                    or self._session_error is not None
-                    or self._failure_error is not None
-                ):
+                if self._session_error is not None or self._failure_error is not None:
                     # Any receipt acquired during a concurrent session loss is left to the Broker.
                     self._slots.release()
-                    if self._session_error is None and self._failure_error is None:
-                        delays = iter(_RECOVERY_DELAYS)
+                    continue
+                if not self._receipt_recovery:
+                    self._recovery_delays = iter(_RECOVERY_DELAYS)
+                if not messages:
+                    self._slots.release()
                     continue
                 if len(messages) != 1:
                     self._slots.release()
                     raise RuntimeError("driver returned more messages than reserved capacity")
-                delays = iter(_RECOVERY_DELAYS)
                 task = asyncio.create_task(self._handle(messages[0]))
                 self._tasks.add(task)
                 task.add_done_callback(self._completed)
@@ -396,12 +399,19 @@ class RocketMQSubscriber:
         except Exception as error:
             self._fail(error)
 
-    def _record_session_loss(self, error: Exception) -> bool:
-        if not _consumer_session_lost(error):
+    def _record_session_loss(self, error: Exception, *, receipt_operation: bool = False) -> bool:
+        if not _consumer_session_lost(error, receipt_operation=receipt_operation):
             return False
         if self._session_error is None:
             self._session_error = error
+        # Successful long polls do not demonstrate that receipt operations recovered.
+        self._receipt_recovery |= receipt_operation
         return True
+
+    def _receipt_settled(self) -> None:
+        if self._session_error is None:
+            self._receipt_recovery = False
+            self._recovery_delays = iter(_RECOVERY_DELAYS)
 
     def _fail(self, error: BaseException) -> None:
         if self._failure_error is None:
@@ -436,7 +446,7 @@ class RocketMQSubscriber:
                             math.ceil(self.invisible_duration),
                         )
                     except Exception as error:
-                        if not self._record_session_loss(error):
+                        if not self._record_session_loss(error, receipt_operation=True):
                             self._fail(error)
                         if task is not None:
                             task.cancel()
@@ -478,17 +488,22 @@ class RocketMQSubscriber:
                                 await self._failed(received)
                             else:
                                 raise
-                async with lock:
-                    try:
-                        await self._driver.call(self._driver.client.ack, raw)
-                    except Exception as error:
-                        if not self._record_session_loss(error):
-                            raise
-                    done.set()
+            # The driver's RPC deadline owns the ACK. Cancelling the executor wait
+            # at the handler deadline would let a retry race the in-flight ACK.
+            async with lock:
+                done.set()
+                try:
+                    await self._driver.call(self._driver.client.ack, raw)
+                except Exception as error:
+                    if not self._record_session_loss(error, receipt_operation=True):
+                        raise
+                else:
+                    self._receipt_settled()
         except asyncio.CancelledError:
             raise  # unknown host outcome: no acknowledgement or business replay
         except Exception:
             async with lock:
+                done.set()
                 try:
                     await self._driver.call(
                         self._driver.client.change_invisible_duration,
@@ -496,8 +511,10 @@ class RocketMQSubscriber:
                         math.ceil(self.retry_cap),
                     )
                 except Exception as error:
-                    if not self._record_session_loss(error):
+                    if not self._record_session_loss(error, receipt_operation=True):
                         raise
+                else:
+                    self._receipt_settled()
         finally:
             done.set()
             renewer.cancel()
