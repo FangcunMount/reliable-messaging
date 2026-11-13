@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from grpc import RpcError, StatusCode  # type: ignore[import-untyped]
 from rocketmq.v5.model import Message as DriverMessage  # type: ignore[import-untyped]
 
 from reliable_messaging.delivery import Confirmation, Outcome
@@ -18,6 +19,11 @@ from reliable_messaging.rocketmq import (
 )
 from reliable_messaging.transport import RouteBinding, consumer_group, physical_topic
 from reliable_messaging.wire import Envelope, encode
+
+
+class Unavailable(RpcError):  # type: ignore[misc]
+    def code(self) -> StatusCode:
+        return StatusCode.UNAVAILABLE
 
 
 def configuration() -> Config:
@@ -199,13 +205,8 @@ async def test_receive_failure_reaches_host_supervision_with_cause() -> None:
 async def test_receive_reregisters_after_proxy_session_loss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from grpc import RpcError, StatusCode  # type: ignore[import-untyped]
     from rocketmq.grpc_protocol import Code  # type: ignore[import-untyped]
     from rocketmq.v5.exception import InternalErrorException  # type: ignore[import-untyped]
-
-    class Unavailable(RpcError):  # type: ignore[misc]
-        def code(self) -> StatusCode:
-            return StatusCode.UNAVAILABLE
 
     lost_settings = InternalErrorException(
         'Cannot invoke "apache.rocketmq.v2.Settings.getClientType()" because "settings" is null',
@@ -275,6 +276,169 @@ async def test_receive_reregisters_after_proxy_session_loss(
         with pytest.raises(RuntimeError):
             await supervision
     assert calls[-1] == "new_shutdown"
+
+
+@pytest.mark.parametrize("disconnect_during", ["ack", "renew", "retry"])
+async def test_in_flight_session_loss_redelivers_with_current_receipt(
+    monkeypatch: pytest.MonkeyPatch, disconnect_during: str
+) -> None:
+    config = configuration()
+    route = config.routes[0]
+    replacement_ack = threading.Event()
+    order: list[tuple[str, object]] = []
+    old, current = (
+        SimpleNamespace(
+            topic=route.physical_topic,
+            corrupted=False,
+            body=encode(Envelope("preserved-id", b"original")),
+            delivery_attempt=attempt,
+            born_timestamp=123,
+            message_id="same-broker-message",
+        )
+        for attempt in (1, 2)
+    )
+    committed: set[bytes] = set()
+    attempts: list[int] = []
+
+    async def handle(delivery: Any) -> None:
+        attempts.append(delivery.attempts)
+        if delivery.attempts == 1:
+            if disconnect_during == "renew":
+                await asyncio.Event().wait()
+            if disconnect_during == "retry":
+                raise ValueError("host requested redelivery")
+        committed.add(delivery.wire)
+
+    def old_ack(raw: object) -> None:
+        assert disconnect_during == "ack"
+        order.append(("old-ack-lost", raw))
+        raise Unavailable()
+
+    def old_visibility(raw: object, duration: int) -> None:
+        assert disconnect_during in ("renew", "retry")
+        order.append(("old-visibility-lost", raw))
+        raise Unavailable()
+
+    def new_ack(raw: object) -> None:
+        order.append(("new-ack", raw))
+        replacement_ack.set()
+
+    first = SimpleNamespace(
+        receive=lambda *_: [old],
+        ack=old_ack,
+        change_invisible_duration=old_visibility,
+        shutdown=lambda: order.append(("old-shutdown", None)),
+    )
+    second = SimpleNamespace(
+        receive=lambda *_: [current] if not replacement_ack.is_set() else [],
+        ack=new_ack,
+        shutdown=lambda: order.append(("new-shutdown", None)),
+    )
+    subscriber = RocketMQSubscriber(
+        config,
+        route.topic,
+        route.subscription,
+        handler=handle,
+        failed_handler=AsyncMock(),
+        invalid_handler=AsyncMock(),
+    )
+    # Fast virtual lease for the focused renew test. Public validation is unchanged.
+    subscriber.invisible_duration = 0.03
+    clients = iter((first, second))
+
+    def register() -> None:
+        subscriber._driver.client = next(clients)
+
+    # The one-slot subscriber cannot receive again until its first handler settles.
+    monkeypatch.setattr(subscriber, "_start_consumer", register)
+    await subscriber.start()
+    supervision = asyncio.create_task(subscriber.wait())
+    try:
+        assert await asyncio.to_thread(replacement_ack.wait, 3)
+        assert not supervision.done()
+        expected = "old-ack-lost" if disconnect_during == "ack" else "old-visibility-lost"
+        assert order == [(expected, old), ("old-shutdown", None), ("new-ack", current)]
+        assert attempts == [1, 2]
+        assert committed == {old.body}
+    finally:
+        await subscriber.stop()
+        with pytest.raises(RuntimeError):
+            await supervision
+
+
+async def test_repeated_receive_failure_spends_one_recovery_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = configuration()
+    route = config.routes[0]
+    starts = 0
+    shutdowns = 0
+
+    def receive(*args: object) -> None:
+        raise Unavailable()
+
+    def shutdown() -> None:
+        nonlocal shutdowns
+        shutdowns += 1
+
+    subscriber = RocketMQSubscriber(
+        config,
+        route.topic,
+        route.subscription,
+        handler=AsyncMock(),
+        failed_handler=AsyncMock(),
+        invalid_handler=AsyncMock(),
+    )
+
+    def register() -> None:
+        nonlocal starts
+        starts += 1
+        subscriber._driver.client = SimpleNamespace(receive=receive, shutdown=shutdown)
+
+    monkeypatch.setattr("reliable_messaging.rocketmq._RECOVERY_DELAYS", (0, 0))
+    monkeypatch.setattr(subscriber, "_start_consumer", register)
+    await subscriber.start()
+    try:
+        with pytest.raises(RuntimeError) as reported:
+            await asyncio.wait_for(subscriber.wait(), 2)
+        exhausted = reported.value.__cause__
+        assert exhausted is not None and "session recovery exhausted" in str(exhausted)
+        assert isinstance(exhausted.__cause__, Unavailable)
+        assert starts == shutdowns == 3
+    finally:
+        await subscriber.stop()
+
+
+async def test_stop_retry_does_not_shutdown_same_client_twice() -> None:
+    config = configuration()
+    route = config.routes[0]
+    entered, release = threading.Event(), threading.Event()
+    calls = 0
+
+    def shutdown() -> None:
+        nonlocal calls
+        calls += 1
+        entered.set()
+        assert release.wait(5)
+
+    subscriber = RocketMQSubscriber(
+        config,
+        route.topic,
+        route.subscription,
+        handler=AsyncMock(),
+        failed_handler=AsyncMock(),
+        invalid_handler=AsyncMock(),
+    )
+    subscriber._driver.begin()
+    subscriber._driver.client = SimpleNamespace(shutdown=shutdown)
+    try:
+        with pytest.raises(TimeoutError):
+            await subscriber.stop(grace_seconds=0.05)
+        assert entered.is_set()
+    finally:
+        release.set()
+        await subscriber.stop()
+    assert calls == 1
 
 
 async def test_receiver_cannot_create_more_handlers_than_reserved_slots() -> None:
