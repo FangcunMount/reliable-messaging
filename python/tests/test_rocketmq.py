@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -182,7 +183,10 @@ async def test_failed_audit_cannot_ack() -> None:
     await subscriber._driver.close(1)
 
 
-async def test_receive_failure_reaches_host_supervision_with_cause() -> None:
+@pytest.mark.parametrize("rpc_error", [ConnectionError, DeadlineExceeded])
+async def test_receive_failure_reaches_host_supervision_with_cause(
+    rpc_error: type[Exception],
+) -> None:
     config = configuration()
     subscriber = RocketMQSubscriber(
         config,
@@ -197,13 +201,13 @@ async def test_receive_failure_reaches_host_supervision_with_cause() -> None:
     subscriber._failure = asyncio.get_running_loop().create_future()
 
     def receive(*args: object) -> None:
-        raise ConnectionError("disposable broker disconnected")
+        raise rpc_error("disposable broker disconnected")
 
     subscriber._driver.client = SimpleNamespace(receive=receive, shutdown=lambda: None)
     await subscriber._poll()
     with pytest.raises(RuntimeError) as failure:
         await subscriber.wait()
-    assert isinstance(failure.value.__cause__, ConnectionError)
+    assert isinstance(failure.value.__cause__, rpc_error)
     await subscriber._driver.close(1)
 
 
@@ -284,13 +288,21 @@ async def test_receive_reregisters_after_proxy_session_loss(
 
 
 @pytest.mark.parametrize("rpc_error", [Unavailable, DeadlineExceeded])
-@pytest.mark.parametrize("disconnect_during", ["ack", "renew", "retry"])
+@pytest.mark.parametrize(
+    "disconnect_during,concurrent_poll",
+    [("ack", False), ("renew", False), ("retry", False), ("ack", True)],
+)
 async def test_in_flight_session_loss_redelivers_with_current_receipt(
-    monkeypatch: pytest.MonkeyPatch, disconnect_during: str, rpc_error: type[RpcError]
+    monkeypatch: pytest.MonkeyPatch,
+    disconnect_during: str,
+    concurrent_poll: bool,
+    rpc_error: type[RpcError],
 ) -> None:
-    config = configuration()
+    config = replace(configuration(), max_in_flight=2) if concurrent_poll else configuration()
     route = config.routes[0]
     replacement_ack = threading.Event()
+    pending_receive = threading.Event()
+    lost_session = threading.Event()
     order: list[tuple[str, object]] = []
     old, current = (
         SimpleNamespace(
@@ -309,6 +321,8 @@ async def test_in_flight_session_loss_redelivers_with_current_receipt(
     async def handle(delivery: Any) -> None:
         attempts.append(delivery.attempts)
         if delivery.attempts == 1:
+            if concurrent_poll:
+                assert await asyncio.to_thread(pending_receive.wait, 2)
             if disconnect_during == "renew":
                 await asyncio.Event().wait()
             if disconnect_during == "retry":
@@ -329,14 +343,26 @@ async def test_in_flight_session_loss_redelivers_with_current_receipt(
         order.append(("new-ack", raw))
         replacement_ack.set()
 
+    def old_poll_timeout() -> list[Any]:
+        pending_receive.set()
+        assert lost_session.wait(2)
+        raise DeadlineExceeded()
+
+    first_batches = iter(([old], old_poll_timeout))
+
+    def old_receive(*args: object) -> list[Any]:
+        batch = next(first_batches)
+        return batch() if callable(batch) else batch
+
+    replacement_batches = iter(([current],))
     first = SimpleNamespace(
-        receive=lambda *_: [old],
+        receive=old_receive,
         ack=old_ack,
         change_invisible_duration=old_visibility,
         shutdown=lambda: order.append(("old-shutdown", None)),
     )
     second = SimpleNamespace(
-        receive=lambda *_: [current] if not replacement_ack.is_set() else [],
+        receive=lambda *_: next(replacement_batches, []),
         ack=new_ack,
         shutdown=lambda: order.append(("new-shutdown", None)),
     )
@@ -355,8 +381,17 @@ async def test_in_flight_session_loss_redelivers_with_current_receipt(
     def register() -> None:
         subscriber._driver.client = next(clients)
 
-    # The one-slot subscriber cannot receive again until its first handler settles.
     monkeypatch.setattr(subscriber, "_start_consumer", register)
+    if concurrent_poll:
+        record_loss = subscriber._record_session_loss
+
+        def record_and_release(error: Exception, *, receipt_operation: bool = False) -> bool:
+            result = record_loss(error, receipt_operation=receipt_operation)
+            if result and receipt_operation:
+                lost_session.set()
+            return result
+
+        monkeypatch.setattr(subscriber, "_record_session_loss", record_and_release)
     await subscriber.start()
     supervision = asyncio.create_task(subscriber.wait())
     try:

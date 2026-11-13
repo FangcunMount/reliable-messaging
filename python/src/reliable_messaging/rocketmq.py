@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 _RECOVERY_DELAYS = (0, 1, 2, 4, 8, 8, 8)
 
 
-def _consumer_session_lost(error: Exception, *, receipt_operation: bool = False) -> bool:
+def _consumer_session_lost(error: Exception, *, include_deadline: bool = False) -> bool:
     from grpc import RpcError, StatusCode  # type: ignore[import-untyped]
     from rocketmq.grpc_protocol import Code  # type: ignore[import-untyped]
     from rocketmq.v5.exception import InternalErrorException  # type: ignore[import-untyped]
@@ -31,7 +31,7 @@ def _consumer_session_lost(error: Exception, *, receipt_operation: bool = False)
     if isinstance(error, RpcError):
         status = error.code()
         return status == StatusCode.UNAVAILABLE or (
-            receipt_operation and status == StatusCode.DEADLINE_EXCEEDED
+            include_deadline and status == StatusCode.DEADLINE_EXCEEDED
         )
     # RocketMQ 5.5.1 reports an absent Proxy registration as an internal error.
     return (
@@ -400,7 +400,10 @@ class RocketMQSubscriber:
             self._fail(error)
 
     def _record_session_loss(self, error: Exception, *, receipt_operation: bool = False) -> bool:
-        if not _consumer_session_lost(error, receipt_operation=receipt_operation):
+        # An old long poll can expire while a receipt has already marked the session lost.
+        if not _consumer_session_lost(
+            error, include_deadline=receipt_operation or self._session_error is not None
+        ):
             return False
         if self._session_error is None:
             self._session_error = error
