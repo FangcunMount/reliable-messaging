@@ -8,6 +8,7 @@ for blocking driver calls, closes its clients and never stops another client's l
 import asyncio
 import base64
 import functools
+import logging
 import math
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,28 @@ from typing import Any
 from reliable_messaging.delivery import Confirmation, DeliveryResult, Outcome
 from reliable_messaging.transport import Received, RouteBinding, RouteResolver
 from reliable_messaging.wire import MAX_METADATA_BYTES, decode, go_json
+
+logger = logging.getLogger(__name__)
+
+
+def _consumer_session_lost(error: Exception) -> bool:
+    from grpc import RpcError, StatusCode  # type: ignore[import-untyped]
+    from rocketmq.grpc_protocol import Code  # type: ignore[import-untyped]
+    from rocketmq.v5.exception import InternalErrorException  # type: ignore[import-untyped]
+
+    if isinstance(error, RpcError):
+        return error.code() == StatusCode.UNAVAILABLE
+    # RocketMQ 5.5.1 reports an absent Proxy registration as an internal error.
+    return (
+        isinstance(error, InternalErrorException)
+        and error.code == Code.INTERNAL_SERVER_ERROR
+        and "Settings.getClientType()" in str(error)
+        and '"settings" is null' in str(error)
+    )
+
+
+class _ConsumerRouteUnavailable(RuntimeError):
+    """The pinned driver discarded the route RPC status before raising."""
 
 
 @dataclass(frozen=True)
@@ -242,54 +265,102 @@ class RocketMQSubscriber:
         self._failure: asyncio.Future[None] | None = None
         self._failure_error: BaseException | None = None
 
+    def _start_consumer(self) -> None:
+        from rocketmq.v5.client import (  # type: ignore[import-untyped]
+            ClientConfiguration,
+            Credentials,
+        )
+        from rocketmq.v5.consumer import SimpleConsumer  # type: ignore[import-untyped]
+        from rocketmq.v5.model import FilterExpression  # type: ignore[import-untyped]
+
+        client = SimpleConsumer(
+            ClientConfiguration(
+                self.config.endpoint,
+                Credentials(self.config.access_key, self.config.secret_key),
+                request_timeout=math.ceil(self.config.timeout),
+            ),
+            self.route.consumer_group,
+            {physical: FilterExpression() for physical in self._physical_routes},
+            await_duration=5,
+            tls_enable=True,
+        )
+        self._driver.client = client
+        try:
+            client.startup()
+            for physical in self._physical_routes:
+                try:
+                    client._retrieve_topic_route_data(physical)
+                except Exception as error:
+                    # 5.1.2 logs the status in the route callback and raises a
+                    # plain Exception from its synchronous lookup.
+                    if type(error) is Exception and str(error) == (
+                        f"failed to fetch topic:{physical} route."
+                    ):
+                        raise _ConsumerRouteUnavailable(str(error)) from error
+                    raise
+            _require_server_settings(client, self.config.timeout)
+        except Exception:
+            self._stop_consumer()
+            raise
+
+    def _stop_consumer(self) -> None:
+        client = self._driver.client
+        if client is not None:
+            client.shutdown()
+            self._driver.client = None
+
     async def start(self) -> None:
         self._driver.begin()
         self._slots = asyncio.Semaphore(self.config.max_in_flight)
         self._failure = asyncio.get_running_loop().create_future()
 
-        def create() -> None:
-            from rocketmq.v5.client import (  # type: ignore[import-untyped]
-                ClientConfiguration,
-                Credentials,
-            )
-            from rocketmq.v5.consumer import SimpleConsumer  # type: ignore[import-untyped]
-            from rocketmq.v5.model import FilterExpression  # type: ignore[import-untyped]
-
-            self._driver.client = SimpleConsumer(
-                ClientConfiguration(
-                    self.config.endpoint,
-                    Credentials(self.config.access_key, self.config.secret_key),
-                    request_timeout=math.ceil(self.config.timeout),
-                ),
-                self.route.consumer_group,
-                {physical: FilterExpression() for physical in self._physical_routes},
-                await_duration=5,
-                tls_enable=True,
-            )
-            self._driver.client.startup()
-            for physical in self._physical_routes:
-                self._driver.client._retrieve_topic_route_data(physical)
-            _require_server_settings(self._driver.client, self.config.timeout)
-
         try:
-            await self._driver.call(create)
+            await self._driver.call(self._start_consumer)
             self._poller = asyncio.create_task(self._poll())
         except BaseException:
             await self._driver.close(self.config.timeout + 5)
             raise
 
+    async def _recover_consumer(self) -> None:
+        # Keep the old consumer available to handlers that still own receipts.
+        if self._tasks:
+            await asyncio.shield(asyncio.gather(*self._tasks, return_exceptions=True))
+        if self._driver.closing or self._failure_error is not None:
+            return
+        await self._driver.call(self._stop_consumer)
+        logger.warning("RocketMQ receive lost its session; restoring consumer settings")
+        for delay in (0, 1, 2, 4, 8, 8, 8):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                await self._driver.call(self._start_consumer)
+            except Exception as error:
+                if self._driver.client is not None or not (
+                    isinstance(error, (TimeoutError, _ConsumerRouteUnavailable))
+                    or _consumer_session_lost(error)
+                ):
+                    raise
+                last_error = error
+            else:
+                logger.info("RocketMQ consumer settings restored")
+                return
+        raise RuntimeError("RocketMQ consumer session recovery exhausted") from last_error
+
     async def _poll(self) -> None:
         assert self._slots is not None
         try:
-            while not self._driver.closing:
+            while not self._driver.closing and self._failure_error is None:
                 await self._slots.acquire()
                 try:
                     messages = await self._driver.call(
                         self._driver.client.receive, 1, math.ceil(self.invisible_duration)
                     )
-                except BaseException:
+                except BaseException as error:
                     self._slots.release()
-                    raise
+                    if not isinstance(error, Exception) or not _consumer_session_lost(error):
+                        raise
+                    await self._recover_consumer()
+                    continue
                 if not messages:
                     self._slots.release()
                     continue

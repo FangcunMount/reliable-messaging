@@ -12,6 +12,8 @@ from reliable_messaging.rocketmq import (
     Config,
     RocketMQPublisher,
     RocketMQSubscriber,
+    _consumer_session_lost,
+    _ConsumerRouteUnavailable,
     _require_server_settings,
 )
 from reliable_messaging.transport import RouteBinding, consumer_group, physical_topic
@@ -192,6 +194,87 @@ async def test_receive_failure_reaches_host_supervision_with_cause() -> None:
         await subscriber.wait()
     assert isinstance(failure.value.__cause__, ConnectionError)
     await subscriber._driver.close(1)
+
+
+async def test_receive_reregisters_after_proxy_session_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from grpc import RpcError, StatusCode  # type: ignore[import-untyped]
+    from rocketmq.grpc_protocol import Code  # type: ignore[import-untyped]
+    from rocketmq.v5.exception import InternalErrorException  # type: ignore[import-untyped]
+
+    class Unavailable(RpcError):  # type: ignore[misc]
+        def code(self) -> StatusCode:
+            return StatusCode.UNAVAILABLE
+
+    lost_settings = InternalErrorException(
+        'Cannot invoke "apache.rocketmq.v2.Settings.getClientType()" because "settings" is null',
+        Code.INTERNAL_SERVER_ERROR,
+    )
+    assert _consumer_session_lost(lost_settings)
+    other_error = InternalErrorException("storage fault", Code.INTERNAL_SERVER_ERROR)
+    assert not _consumer_session_lost(other_error)
+    config = configuration()
+    route = config.routes[0]
+    acknowledged = threading.Event()
+    calls = []
+
+    def disconnect(*args: object) -> None:
+        raise Unavailable()
+
+    raw = SimpleNamespace(
+        topic=route.physical_topic,
+        corrupted=False,
+        body=encode(Envelope("preserved-id", b"body")),
+        delivery_attempt=2,
+        born_timestamp=123,
+        message_id="original-physical-id",
+    )
+    replacement = SimpleNamespace(
+        receive=lambda *_: [raw] if not acknowledged.is_set() else [],
+        ack=lambda message: (calls.append(("ack", message)), acknowledged.set()),
+        shutdown=lambda: calls.append("new_shutdown"),
+    )
+    first = SimpleNamespace(receive=disconnect, shutdown=lambda: calls.append("old_shutdown"))
+    handler = AsyncMock()
+    subscriber = RocketMQSubscriber(
+        config,
+        route.topic,
+        route.subscription,
+        handler=handler,
+        failed_handler=AsyncMock(),
+        invalid_handler=AsyncMock(),
+    )
+    clients = iter((first, None, replacement))
+
+    def register() -> None:
+        client = next(clients)
+        if client is None:
+            calls.append("route_unavailable")
+            raise _ConsumerRouteUnavailable("route RPC unavailable during restart")
+        subscriber._driver.client = client
+        calls.append("registered")
+
+    monkeypatch.setattr(subscriber, "_start_consumer", register)
+    await subscriber.start()
+    supervision = asyncio.create_task(subscriber.wait())
+    try:
+        assert await asyncio.to_thread(acknowledged.wait, 2)
+        assert not supervision.done()
+        assert calls == [
+            "registered",
+            "old_shutdown",
+            "route_unavailable",
+            "registered",
+            ("ack", raw),
+        ]
+        assert handler.await_count == 1
+        assert handler.await_args.args[0].transport_id == "original-physical-id"
+    finally:
+        await subscriber.stop()
+        with pytest.raises(RuntimeError):
+            await supervision
+    assert calls[-1] == "new_shutdown"
 
 
 async def test_receiver_cannot_create_more_handlers_than_reserved_slots() -> None:
