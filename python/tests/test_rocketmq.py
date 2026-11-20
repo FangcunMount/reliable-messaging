@@ -289,18 +289,26 @@ async def test_receive_reregisters_after_proxy_session_loss(
 
 @pytest.mark.parametrize("rpc_error", [Unavailable, DeadlineExceeded])
 @pytest.mark.parametrize(
-    "disconnect_during,concurrent_poll",
-    [("ack", False), ("renew", False), ("retry", False), ("ack", True)],
+    "disconnect_during,concurrent_poll,route_ready",
+    [
+        ("ack", False, 0),
+        ("renew", False, 0),
+        ("retry", False, 0),
+        ("ack", True, 0),
+        pytest.param("ack", False, 45, id="ack-with-slow-route"),
+    ],
 )
 async def test_in_flight_session_loss_redelivers_with_current_receipt(
     monkeypatch: pytest.MonkeyPatch,
     disconnect_during: str,
     concurrent_poll: bool,
+    route_ready: int,
     rpc_error: type[RpcError],
 ) -> None:
     config = replace(configuration(), max_in_flight=2) if concurrent_poll else configuration()
     route = config.routes[0]
-    replacement_ack = threading.Event()
+    loop = asyncio.get_running_loop()
+    replacement_ack = asyncio.Event()
     pending_receive = threading.Event()
     lost_session = threading.Event()
     order: list[tuple[str, object]] = []
@@ -341,7 +349,7 @@ async def test_in_flight_session_loss_redelivers_with_current_receipt(
 
     def new_ack(raw: object) -> None:
         order.append(("new-ack", raw))
-        replacement_ack.set()
+        loop.call_soon_threadsafe(replacement_ack.set)
 
     def old_poll_timeout() -> list[Any]:
         pending_receive.set()
@@ -377,10 +385,27 @@ async def test_in_flight_session_loss_redelivers_with_current_receipt(
     # Fast virtual lease for the focused renew test. Public validation is unchanged.
     subscriber.invisible_duration = 0.03
     clients = iter((first, second))
+    elapsed = 0.0
+    sleep = asyncio.sleep
+    route_checks: list[float] = []
+
+    async def advance_recovery_delay(delay: float) -> None:
+        nonlocal elapsed
+        if asyncio.current_task() is subscriber._poller:
+            elapsed += delay
+            await sleep(0)
+        else:
+            await sleep(delay)
 
     def register() -> None:
+        if order:
+            route_checks.append(elapsed)
+            if elapsed < route_ready:
+                raise _ConsumerRouteUnavailable("route not yet visible after restart")
         subscriber._driver.client = next(clients)
 
+    if route_ready:
+        monkeypatch.setattr(asyncio, "sleep", advance_recovery_delay)
     monkeypatch.setattr(subscriber, "_start_consumer", register)
     if concurrent_poll:
         record_loss = subscriber._record_session_loss
@@ -394,14 +419,23 @@ async def test_in_flight_session_loss_redelivers_with_current_receipt(
         monkeypatch.setattr(subscriber, "_record_session_loss", record_and_release)
     await subscriber.start()
     supervision = asyncio.create_task(subscriber.wait())
+    acknowledged = asyncio.create_task(replacement_ack.wait())
     try:
-        assert await asyncio.to_thread(replacement_ack.wait, 3)
-        assert not supervision.done()
+        await asyncio.wait(
+            (acknowledged, supervision), timeout=3, return_when=asyncio.FIRST_COMPLETED
+        )
+        if supervision.done():
+            await supervision
+        assert replacement_ack.is_set()
+        assert route_checks[0] == 0 and route_checks[-1] >= route_ready
+        assert all(check < route_ready for check in route_checks[:-1])
         expected = "old-ack-lost" if disconnect_during == "ack" else "old-visibility-lost"
         assert order == [(expected, old), ("old-shutdown", None), ("new-ack", current)]
         assert attempts == [1, 2]
         assert committed == {old.body}
     finally:
+        acknowledged.cancel()
+        await asyncio.gather(acknowledged, return_exceptions=True)
         await subscriber.stop()
         with pytest.raises(RuntimeError):
             await supervision
