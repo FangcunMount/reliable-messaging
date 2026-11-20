@@ -2,13 +2,17 @@
 
 本页记录可消费的固定语言版本、源码与发布资产。2026-10-23新增T24协议观察固定预发布；已发布制品、宿主采用与生产验收分别记录。宿主依赖、部署和业务验收由各宿主另行记录，历史条目保留其采集日期。
 
-<!-- source-python-version: 0.5.1 -->
+<!-- source-python-version: 0.5.2 -->
 
-## Python 0.5.1 候选
+## Python 0.5.2 候选
+
+[SDK #71](https://github.com/FangcunMount/reliable-messaging/pull/71) 增加 RocketMQ 消费会话的回连尝试。单次退避最多八秒，累计退避从 31 秒增至 63 秒，驱动调用时间另计。候选用 ACK 错误后主题路由延迟 45 秒的用例验证同进程恢复及替换回执。正式制品发布、宿主采用和生产验收分别记录。
+
+## Python 0.5.1
 
 [SDK #69](https://github.com/FangcunMount/reliable-messaging/pull/69) 修复 RocketMQ 消费会话断开后的同进程恢复。消费端等待原处理和已发出的回执调用收口，再重新注册 Settings。测试覆盖旧 ACK 与并发 Receive 超时、原重试位点复用，以及最终 ACK 对应当前投递 CK。
 
-0.5.1 候选调整 Python 包版本和锁文件中的包元数据。发布前核对精确候选的两档源码、安装 wheel 测试及原生宿主恢复。现有 0.5.0 正式资产与 Go v0.6.1 继续保留各自的固定来源。
+正式资产固定在源码 `f2163bf58d5c848988ec608ac1163350603d1749`。 [Python 0.5.1 发布](https://github.com/FangcunMount/reliable-messaging/releases/tag/python/v0.5.1)
 
 ## Go 接收输入轮转修正版（2026-10-30）
 
