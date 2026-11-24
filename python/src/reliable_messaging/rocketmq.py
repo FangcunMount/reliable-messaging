@@ -20,7 +20,9 @@ from reliable_messaging.transport import Received, RouteBinding, RouteResolver
 from reliable_messaging.wire import MAX_METADATA_BYTES, decode, go_json
 
 logger = logging.getLogger(__name__)
-_RECOVERY_DELAYS = (0, 1, 2, 4, 8, 8, 8)
+# The topic route can reappear after the Proxy starts accepting connections.
+# Allow up to 79 seconds of backoff, plus the driver calls, before giving up.
+_RECOVERY_DELAYS = (0, 1, 2, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8)
 
 
 def _consumer_session_lost(error: Exception, *, include_deadline: bool = False) -> bool:
