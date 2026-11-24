@@ -296,6 +296,7 @@ async def test_receive_reregisters_after_proxy_session_loss(
         ("retry", False, 0),
         ("ack", True, 0),
         pytest.param("ack", False, 45, id="ack-with-slow-route"),
+        pytest.param("ack", False, 75, id="ack-with-extended-route-delay"),
     ],
 )
 async def test_in_flight_session_loss_redelivers_with_current_receipt(
